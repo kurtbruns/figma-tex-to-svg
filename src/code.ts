@@ -6,8 +6,9 @@ figma.ui.onmessage = (pluginMessage) => {
 
   const nodes: SceneNode [] = [];
   let svg = figma.createNodeFromSvg(pluginMessage.svg);
-  nodes.push(svg)
   svg.rescale(1.5);
+  svg.name = pluginMessage.tex;
+  nodes.push(svg)
 
   figma.currentPage.selection = nodes;
   figma.currentPage.appendChild(svg)

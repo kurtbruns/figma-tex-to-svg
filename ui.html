@@ -117,8 +117,9 @@
 
   // place the svg on the figma canvas
   document.getElementById('place').onclick = () => {
+    const tex = document.getElementById("input").value.trim();
     const svg = document.getElementById('output').firstChild.innerHTML;
-    parent.postMessage({ pluginMessage: { svg } }, '*');
+    parent.postMessage({ pluginMessage: { tex, svg } }, '*');
   }
 
   // render default text
