@@ -8,6 +8,10 @@
     background: var(--background-color);
   }
 
+  h1 {
+  font-size: 18px;
+}
+
   h1,
   h2,
   h3,
@@ -43,28 +47,61 @@
     grid-template-columns: auto auto;
   }
 
+  #input {
+    height: 180px;
+    min-height: 120px;
+  }
+
   #output {
     display: block;
     width: 100%;
     min-height: 72px;
     margin-bottom: 1rem;
   }
+
+  #settings-panel .settings-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.5rem 1.5rem;
+    align-items: center;
+  }
+  #settings-panel .settings-grid > div {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
 </style>
 
 <main>
-  <h1>TeX to SVG</h1>
+  <h1>TeX to SVG (Dev)</h1>
   <div class="container">
     <textarea id="input">x=\frac{-b \pm \sqrt{b^2-4 a c}}{2 a}</textarea>
     <br>
+    <div id="settings-panel" style="border: 1px solid #555; padding: 1rem; margin-bottom: 0.5rem; border-radius: 6px; background: #2a333a;">
+      <div class="settings-grid">
+        <div>
+          <input type="checkbox" id="display" checked="true" onchange="convert()">
+          <label for="display">Display style</label>
+        </div>
+        <div>
+          <label for="bgcolor" style="width: 80px;">Background</label>
+          <input type="color" id="bgcolor-picker" style="width: 32px; height: 32px; padding: 0; border: none; background: none;">
+          <input type="text" id="bgcolor" maxlength="7" style="width: 80px; margin-left: 0.5rem;" onchange="onColorTextChange('bgcolor')">
+        </div>
+        <div>
+          <label for="scale">Scale</label>
+          <input type="number" id="scale" min="1" step="0.5" placeholder="1.5" style="width: 60px;">
+        </div>
+        <div>
+          <label for="fontcolor" style="width: 80px;">Font</label>
+          <input type="color" id="fontcolor-picker" style="width: 32px; height: 32px; padding: 0; border: none; background: none;">
+          <input type="text" id="fontcolor" maxlength="7" style="width: 80px; margin-left: 0.5rem;" onchange="onColorTextChange('fontcolor')">
+        </div>
 
-    <div class="controls">
-      <input type="button" value="Render" id="render" onclick="convert()">
-      <div style="margin-left: 0.5rem;">
-        <input type="checkbox" id="display" checked="true" onchange="convert()">
-        <label for="display">Display style</label>
       </div>
     </div>
     <br clear="all">
+    <label>Preview</label>
     <div id="output"></div>
   </div>
   <button id="place">Embed</button>
@@ -72,59 +109,116 @@
 
 <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"></script>
 <script>
+  // Theme defaults in one place
+  const THEME_DEFAULTS = {
+    window: {
+      background: '#38464f',
+      font: '#e0e0e0',
+    },
+    dark: {
+      background: '#000000',
+      font: '#e0e0e0',
+    },
+    light: {
+      background: '#ffffff',
+      font: '#222222',
+    },
+  };
+
+  let currentTheme = 'dark'; // fallback
+
+  function applyTheme(theme) {
+    const defaults = THEME_DEFAULTS[theme] || THEME_DEFAULTS.dark;
+    // document.documentElement.style.setProperty('--background-color', defaults.background);
+    // document.documentElement.style.setProperty('--font-color', defaults.font);
+    document.getElementById('bgcolor').value = defaults.background;
+    document.getElementById('fontcolor').value = defaults.font;
+    currentTheme = theme;
+  }
 
   function convert() {
-
     //  Get the TeX input
     var input = document.getElementById("input").value.trim();
-
-    //  Disable the display and render buttons until MathJax is done
+    var bgcolor = document.getElementById("bgcolor").value.trim() || THEME_DEFAULTS[currentTheme].background;
+    var fontcolor = document.getElementById("fontcolor").value.trim() || THEME_DEFAULTS[currentTheme].font;
+    //  Disable the display button until MathJax is done
     var display = document.getElementById("display");
-    var button = document.getElementById("render");
-    button.disabled = display.disabled = true;
-
+    display.disabled = true;
     //  Clear the old output
     output = document.getElementById('output');
     output.innerHTML = '';
-
-    //  Reset the tex labels (and automatic equation numbers, though there aren't any here).
-    //  Get the conversion options (metrics and display settings)
-    //  Convert the input to SVG output and use a promise to wait for it to be ready
-    //    (in case an extension needs to be loaded dynamically).
+    output.style.background = bgcolor;
     MathJax.texReset();
     var options = MathJax.getMetricsFor(output);
     options.display = display.checked;
-
-    // TODO: this is a hack to get the output to be white
-    MathJax.tex2svgPromise(`\\color{white} ${input}`, options).then(function (node) {
-
-      //  The promise returns the typeset node, which we add to the output
-      //  Then update the document to include the adjusted CSS for the
-      //    content of the new equation.
+    MathJax.tex2svgPromise(`\\color{${fontcolor}} ${input}`, options).then(function (node) {
       output.appendChild(node);
       MathJax.startup.document.clear();
       MathJax.startup.document.updateDocument();
     }).catch(function (err) {
-
-      //  If there was an error, put the message into the output instead
       output.appendChild(document.createElement('pre')).appendChild(document.createTextNode(err.message));
     }).then(function () {
-
-      //  Error or not, re-enable the display and render buttons
-      button.disabled = display.disabled = false;
+      display.disabled = false;
     });
   }
+
+  // Add input event listener for auto-render
+  document.getElementById('input').addEventListener('input', convert);
 
   // place the svg on the figma canvas
   document.getElementById('place').onclick = () => {
     const tex = document.getElementById("input").value.trim();
     const svg = document.getElementById('output').firstChild.innerHTML;
-    parent.postMessage({ pluginMessage: { tex, svg } }, '*');
+    const scaleInput = document.getElementById('scale').value;
+    const scale = scaleInput ? parseFloat(scaleInput) : 1.5;
+    const bgcolor = document.getElementById("bgcolor").value.trim() || THEME_DEFAULTS[currentTheme].background;
+    const fontcolor = document.getElementById("fontcolor").value.trim() || THEME_DEFAULTS[currentTheme].font;
+    parent.postMessage({ pluginMessage: { tex, svg, scale, bgcolor, fontcolor } }, '*');
   }
 
-  // render default text
-  window.onload = (event) => {
+  // Helper to sync color pickers and text inputs
+  function syncColorInputs(colorId) {
+    const picker = document.getElementById(colorId + '-picker');
+    const text = document.getElementById(colorId);
+    // When picker changes, update text and convert
+    picker.addEventListener('input', () => {
+      text.value = picker.value;
+      convert();
+    });
+    // When text changes, update picker and convert (handled by onColorTextChange)
+    text.value = picker.value;
+  }
+
+  function onColorTextChange(colorId) {
+    const picker = document.getElementById(colorId + '-picker');
+    const text = document.getElementById(colorId);
+    // Only update if valid hex
+    if (/^#[0-9A-Fa-f]{6}$/.test(text.value)) {
+      picker.value = text.value;
+      convert();
+    }
+  }
+
+  // On load, set fallback theme and wait for theme message
+  window.onload = () => {
+    applyTheme('dark'); // fallback
+    // Set color pickers to match text values
+    document.getElementById('bgcolor-picker').value = document.getElementById('bgcolor').value || THEME_DEFAULTS[currentTheme].background;
+    document.getElementById('fontcolor-picker').value = document.getElementById('fontcolor').value || THEME_DEFAULTS[currentTheme].font;
+    syncColorInputs('bgcolor');
+    syncColorInputs('fontcolor');
     convert();
-  }
+  };
 
+  window.addEventListener('message', event => {
+    console.log('message', event);
+    const { theme } = event.data.pluginMessage || {};
+    if (theme === 'dark' || theme === 'light') {
+      applyTheme(theme);
+      // Update color pickers to match new theme
+      document.getElementById('bgcolor-picker').value = document.getElementById('bgcolor').value || THEME_DEFAULTS[theme].background;
+      document.getElementById('fontcolor-picker').value = document.getElementById('fontcolor').value || THEME_DEFAULTS[theme].font;
+      convert(); // re-render with new colors
+    }
+  });
 </script>
