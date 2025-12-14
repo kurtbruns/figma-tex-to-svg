@@ -2,14 +2,44 @@ figma.showUI(__html__)
 
 figma.ui.resize(420, 540);
 
+// Load and send saved config to UI
+async function loadAndSendConfig() {
+  try {
+    const config = await figma.clientStorage.getAsync('config');
+    if (config) {
+      figma.ui.postMessage({ type: 'loadConfig', config });
+    }
+  } catch (err) {
+    console.error('Error loading config:', err);
+  }
+}
+
 // Send theme to UI on load
 if ('uiTheme' in figma) {
   console.log('uiTheme', figma.uiTheme);
   figma.ui.postMessage({ theme: figma.uiTheme });
 }
 
-figma.ui.onmessage = (pluginMessage) => {
+// Load saved config on initialization
+loadAndSendConfig();
 
+figma.ui.onmessage = async (pluginMessage) => {
+  // Handle config save
+  if (pluginMessage.type === 'saveConfig') {
+    try {
+      await figma.clientStorage.setAsync('config', {
+        display: pluginMessage.display,
+        bgcolor: pluginMessage.bgcolor,
+        fontcolor: pluginMessage.fontcolor,
+        fontsize: pluginMessage.fontsize,
+      });
+    } catch (err) {
+      console.error('Error saving config:', err);
+    }
+    return;
+  }
+
+  // Handle SVG placement
   const margin = 4;
   const nodes: SceneNode [] = [];
   const background = figma.createRectangle();

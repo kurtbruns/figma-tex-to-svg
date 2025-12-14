@@ -1,7 +1,18 @@
 <style>
   :root {
-    --background-color: #38464f;
-    --font-color: #e0e0e0;
+    --background-color: #ffffff;
+    --font-color: #404040;
+    --settings-panel-background: #f5f5f5;
+    --settings-panel-border: #ddd;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --background-color: #38464f;
+      --font-color: #e0e0e0;
+      --settings-panel-background: #2a333a;
+      --settings-panel-border: #555;
+    }
   }
 
   html {
@@ -48,7 +59,7 @@
   }
 
   #input {
-    height: 180px;
+    height: 160px;
     min-height: 120px;
   }
 
@@ -65,10 +76,46 @@
     gap: 0.5rem 1.5rem;
     align-items: center;
   }
+
   #settings-panel .settings-grid > div {
     display: flex;
     align-items: center;
     gap: 0.5rem;
+  }
+
+  #settings-panel {
+    border: 1px solid var(--settings-panel-border);
+    padding: 1rem;
+    margin-bottom: 0.5rem;
+    border-radius: 6px;
+    background: var(--settings-panel-background);
+  }
+
+  #settings-panel input {
+    font-family: monospace;
+  }
+
+  #settings-panel label[for="bgcolor"],
+  #settings-panel label[for="fontcolor"] {
+    width: 80px;
+  }
+
+  #settings-panel input[type="color"] {
+    width: 24px;
+    height: 27px;
+    padding: 0;
+    border: none;
+    background: none;
+  }
+
+  #settings-panel #bgcolor,
+  #settings-panel #fontcolor {
+    width: 80px;
+    margin-left: 0.5rem;
+  }
+
+  #settings-panel #fontsize {
+    width: 60px;
   }
 </style>
 
@@ -77,27 +124,26 @@
   <div class="container">
     <textarea id="input">x=\frac{-b \pm \sqrt{b^2-4 a c}}{2 a}</textarea>
     <br>
-    <div id="settings-panel" style="border: 1px solid #555; padding: 1rem; margin-bottom: 0.5rem; border-radius: 6px; background: #2a333a;">
+    <div id="settings-panel">
       <div class="settings-grid">
         <div>
           <input type="checkbox" id="display" checked="true" onchange="convert()">
           <label for="display">Display style</label>
         </div>
         <div>
-          <label for="bgcolor" style="width: 80px;">Background</label>
-          <input type="color" id="bgcolor-picker" style="width: 32px; height: 32px; padding: 0; border: none; background: none;">
-          <input type="text" id="bgcolor" maxlength="7" style="width: 80px; margin-left: 0.5rem;" onchange="onColorTextChange('bgcolor')">
+          <label for="bgcolor">Background</label>
+          <input type="color" id="bgcolor-picker">
+          <input type="text" id="bgcolor" maxlength="6" placeholder="000000" onchange="onColorTextChange('bgcolor')">
         </div>
         <div>
-          <label for="scale">Scale</label>
-          <input type="number" id="scale" min="1" step="0.5" placeholder="1.5" style="width: 60px;">
+          <label for="fontsize">Font size</label>
+          <input type="number" id="fontsize" min="8" step="1" placeholder="12" onchange="saveConfig()">
         </div>
         <div>
-          <label for="fontcolor" style="width: 80px;">Font</label>
-          <input type="color" id="fontcolor-picker" style="width: 32px; height: 32px; padding: 0; border: none; background: none;">
-          <input type="text" id="fontcolor" maxlength="7" style="width: 80px; margin-left: 0.5rem;" onchange="onColorTextChange('fontcolor')">
+          <label for="fontcolor">Font</label>
+          <input type="color" id="fontcolor-picker">
+          <input type="text" id="fontcolor" maxlength="6" placeholder="E0E0E0" onchange="onColorTextChange('fontcolor')">
         </div>
-
       </div>
     </div>
     <br clear="all">
@@ -109,19 +155,42 @@
 
 <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"></script>
 <script>
-  // Theme defaults in one place
+  // Expand color according to convention:
+  // 1 digit -> repeat 6 times (2 -> 222222)
+  // 2 digits -> repeat 3 times (20 -> 202020)
+  // 3 digits -> duplicate each digit (123 -> 112233)
+  function expandColor(hex) {
+    if (!hex) return '';
+    // Remove # if present and convert to uppercase
+    const cleaned = hex.replace(/^#/, '').toUpperCase();
+    if (cleaned.length === 1) {
+      // 1 digit -> repeat 6 times
+      return cleaned.repeat(6);
+    } else if (cleaned.length === 2) {
+      // 2 digits -> repeat 3 times
+      return cleaned.repeat(3);
+    } else if (cleaned.length === 3) {
+      // 3 digits -> duplicate each digit
+      return cleaned.split('').map(c => c + c).join('');
+    }
+    // 4+ digits -> return as is (should be 6 for RGB)
+    return cleaned;
+  }
+
+
+  // Theme defaults in one place (without # prefix)
   const THEME_DEFAULTS = {
     window: {
-      background: '#38464f',
-      font: '#e0e0e0',
+      background: '38464F',
+      font: 'E0E0E0',
     },
     dark: {
-      background: '#000000',
-      font: '#e0e0e0',
+      background: '000000',
+      font: 'E0E0E0',
     },
     light: {
-      background: '#ffffff',
-      font: '#222222',
+      background: 'FFFFFF',
+      font: '222222',
     },
   };
 
@@ -129,18 +198,58 @@
 
   function applyTheme(theme) {
     const defaults = THEME_DEFAULTS[theme] || THEME_DEFAULTS.dark;
-    // document.documentElement.style.setProperty('--background-color', defaults.background);
-    // document.documentElement.style.setProperty('--font-color', defaults.font);
     document.getElementById('bgcolor').value = defaults.background;
     document.getElementById('fontcolor').value = defaults.font;
+    // Update color pickers to match (color inputs need # prefix)
+    document.getElementById('bgcolor-picker').value = '#' + defaults.background;
+    document.getElementById('fontcolor-picker').value = '#' + defaults.font;
     currentTheme = theme;
+  }
+
+  function saveConfig() {
+    const display = document.getElementById("display").checked;
+    const bgcolorRaw = document.getElementById("bgcolor").value.trim() || THEME_DEFAULTS[currentTheme].background;
+    const fontcolorRaw = document.getElementById("fontcolor").value.trim() || THEME_DEFAULTS[currentTheme].font;
+    // Expand colors (text inputs never have # prefix)
+    const bgcolor = expandColor(bgcolorRaw);
+    const fontcolor = expandColor(fontcolorRaw);
+    const fontsizeInput = document.getElementById('fontsize').value;
+    const fontsize = fontsizeInput ? parseFloat(fontsizeInput) : 24;
+    
+    parent.postMessage({ 
+      pluginMessage: { 
+        type: 'saveConfig',
+        display,
+        bgcolor,
+        fontcolor,
+        fontsize
+      } 
+    }, '*');
+  }
+
+  // Helper function to set color on all SVG elements
+  function setSVGColor(svgElement, color) {
+    // Set color on the root SVG element
+    svgElement.setAttribute('color', color);
+    
+    // Traverse all elements and set fill style
+    const allElements = svgElement.querySelectorAll('*');
+    allElements.forEach(el => {
+      // Only set fill on elements that have a fill attribute or are path/text elements
+      if (el.hasAttribute('fill') || el.tagName === 'path' || el.tagName === 'text' || el.tagName === 'tspan') {
+        el.style.fill = color;
+      }
+    });
   }
 
   function convert() {
     //  Get the TeX input
     var input = document.getElementById("input").value.trim();
-    var bgcolor = document.getElementById("bgcolor").value.trim() || THEME_DEFAULTS[currentTheme].background;
-    var fontcolor = document.getElementById("fontcolor").value.trim() || THEME_DEFAULTS[currentTheme].font;
+    var bgcolorRaw = document.getElementById("bgcolor").value.trim() || THEME_DEFAULTS[currentTheme].background;
+    var fontcolorRaw = document.getElementById("fontcolor").value.trim() || THEME_DEFAULTS[currentTheme].font;
+    // Expand colors and add # prefix for CSS usage
+    var bgcolor = '#' + expandColor(bgcolorRaw);
+    var fontcolor = '#' + expandColor(fontcolorRaw);
     //  Disable the display button until MathJax is done
     var display = document.getElementById("display");
     display.disabled = true;
@@ -151,7 +260,16 @@
     MathJax.texReset();
     var options = MathJax.getMetricsFor(output);
     options.display = display.checked;
-    MathJax.tex2svgPromise(`\\color{${fontcolor}} ${input}`, options).then(function (node) {
+    // Get font-size
+    const fontsizeInput = document.getElementById('fontsize').value;
+    const fontsize = fontsizeInput ? parseFloat(fontsizeInput) : 12;
+    
+    // Render without color command, then set color directly on SVG elements
+    MathJax.tex2svgPromise(input, options).then(function (node) {
+      // Set the color on all SVG elements after rendering
+      setSVGColor(node, fontcolor);
+      // Set font-size on the root SVG element (like vector library)
+      node.setAttribute('font-size', fontsize + 'px');
       output.appendChild(node);
       MathJax.startup.document.clear();
       MathJax.startup.document.updateDocument();
@@ -160,6 +278,9 @@
     }).then(function () {
       display.disabled = false;
     });
+    
+    // Save config after conversion
+    saveConfig();
   }
 
   // Add input event listener for auto-render
@@ -169,10 +290,15 @@
   document.getElementById('place').onclick = () => {
     const tex = document.getElementById("input").value.trim();
     const svg = document.getElementById('output').firstChild.innerHTML;
-    const scaleInput = document.getElementById('scale').value;
-    const scale = scaleInput ? parseFloat(scaleInput) : 1.5;
-    const bgcolor = document.getElementById("bgcolor").value.trim() || THEME_DEFAULTS[currentTheme].background;
-    const fontcolor = document.getElementById("fontcolor").value.trim() || THEME_DEFAULTS[currentTheme].font;
+    const fontsizeInput = document.getElementById('fontsize').value;
+    const fontsize = fontsizeInput ? parseFloat(fontsizeInput) : 16;
+    const bgcolorRaw = document.getElementById("bgcolor").value.trim() || THEME_DEFAULTS[currentTheme].background;
+    const fontcolorRaw = document.getElementById("fontcolor").value.trim() || THEME_DEFAULTS[currentTheme].font;
+    // Expand colors and add # prefix for Figma (which expects hex with #)
+    const bgcolor = '#' + expandColor(bgcolorRaw);
+    const fontcolor = '#' + expandColor(fontcolorRaw);
+    // Calculate scale from font-size (default MathJax font-size is 12px per em)
+    const scale = fontsize / 12;
     parent.postMessage({ pluginMessage: { tex, svg, scale, bgcolor, fontcolor } }, '*');
   }
 
@@ -180,31 +306,63 @@
   function syncColorInputs(colorId) {
     const picker = document.getElementById(colorId + '-picker');
     const text = document.getElementById(colorId);
-    // When picker changes, update text and convert
+    // When picker changes, update text (without #) and convert
     picker.addEventListener('input', () => {
-      text.value = picker.value;
+      const expanded = expandColor(picker.value);
+      text.value = expanded;
       convert();
     });
-    // When text changes, update picker and convert (handled by onColorTextChange)
-    text.value = picker.value;
+    // When text changes, update picker (with #) and convert (handled by onColorTextChange)
+    const currentValue = text.value.trim() || picker.value.replace(/^#/, '');
+    const expanded = expandColor(currentValue);
+    text.value = expanded;
+    picker.value = '#' + expanded;
   }
 
   function onColorTextChange(colorId) {
     const picker = document.getElementById(colorId + '-picker');
     const text = document.getElementById(colorId);
-    // Only update if valid hex
-    if (/^#[0-9A-Fa-f]{6}$/.test(text.value)) {
-      picker.value = text.value;
+    let value = text.value.trim();
+    
+    // Expand color according to convention
+    const expanded = expandColor(value);
+    
+    // Validate: should be 1-6 hex digits
+    if (/^[0-9A-Fa-f]{1,6}$/i.test(value)) {
+      // Update text with expanded value (without #)
+      text.value = expanded.substring(0, 6); // Limit to 6 hex digits for RGB
+      // Add # to picker (color inputs need # prefix)
+      picker.value = '#' + expanded.substring(0, 6);
       convert();
     }
   }
 
-  // On load, set fallback theme and wait for theme message
+  // Function to detect and apply OS theme
+  function detectAndApplyOSTheme() {
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    const isDark = mediaQuery.matches;
+    const theme = isDark ? 'dark' : 'light';
+    
+    // Update form inputs to match theme (CSS variables are handled by media query)
+    applyTheme(theme);
+    
+    return theme;
+  }
+
+  // On load, detect OS theme and set fallback theme
   window.onload = () => {
-    applyTheme('dark'); // fallback
-    // Set color pickers to match text values
-    document.getElementById('bgcolor-picker').value = document.getElementById('bgcolor').value || THEME_DEFAULTS[currentTheme].background;
-    document.getElementById('fontcolor-picker').value = document.getElementById('fontcolor').value || THEME_DEFAULTS[currentTheme].font;
+    // Detect and apply OS theme
+    const detectedTheme = detectAndApplyOSTheme();
+    
+    // Set color pickers to match text values (with #)
+    const bgcolorValue = document.getElementById('bgcolor').value || THEME_DEFAULTS[currentTheme].background;
+    const fontcolorValue = document.getElementById('fontcolor').value || THEME_DEFAULTS[currentTheme].font;
+    const bgcolorExpanded = expandColor(bgcolorValue);
+    const fontcolorExpanded = expandColor(fontcolorValue);
+    document.getElementById('bgcolor-picker').value = '#' + bgcolorExpanded;
+    document.getElementById('fontcolor-picker').value = '#' + fontcolorExpanded;
+    document.getElementById('bgcolor').value = bgcolorExpanded;
+    document.getElementById('fontcolor').value = fontcolorExpanded;
     syncColorInputs('bgcolor');
     syncColorInputs('fontcolor');
     convert();
@@ -212,13 +370,45 @@
 
   window.addEventListener('message', event => {
     console.log('message', event);
-    const { theme } = event.data.pluginMessage || {};
-    if (theme === 'dark' || theme === 'light') {
-      applyTheme(theme);
-      // Update color pickers to match new theme
-      document.getElementById('bgcolor-picker').value = document.getElementById('bgcolor').value || THEME_DEFAULTS[theme].background;
-      document.getElementById('fontcolor-picker').value = document.getElementById('fontcolor').value || THEME_DEFAULTS[theme].font;
+    const message = event.data.pluginMessage || {};
+    
+    // Handle theme change
+    if (message.theme === 'dark' || message.theme === 'light') {
+      applyTheme(message.theme);
+      // Update color pickers to match new theme (with #)
+      const bgcolorValue = document.getElementById('bgcolor').value || THEME_DEFAULTS[message.theme].background;
+      const fontcolorValue = document.getElementById('fontcolor').value || THEME_DEFAULTS[message.theme].font;
+      const bgcolorExpanded = expandColor(bgcolorValue);
+      const fontcolorExpanded = expandColor(fontcolorValue);
+      document.getElementById('bgcolor-picker').value = '#' + bgcolorExpanded;
+      document.getElementById('fontcolor-picker').value = '#' + fontcolorExpanded;
+      document.getElementById('bgcolor').value = bgcolorExpanded;
+      document.getElementById('fontcolor').value = fontcolorExpanded;
       convert(); // re-render with new colors
+    }
+    
+    // Handle config load
+    if (message.type === 'loadConfig' && message.config) {
+      const config = message.config;
+      if (config.display !== undefined) {
+        document.getElementById('display').checked = config.display;
+      }
+      if (config.bgcolor) {
+        // Expand color (config may have # prefix)
+        const bgcolorValue = expandColor(config.bgcolor);
+        document.getElementById('bgcolor').value = bgcolorValue;
+        document.getElementById('bgcolor-picker').value = '#' + bgcolorValue;
+      }
+      if (config.fontcolor) {
+        // Expand color (config may have # prefix)
+        const fontcolorValue = expandColor(config.fontcolor);
+        document.getElementById('fontcolor').value = fontcolorValue;
+        document.getElementById('fontcolor-picker').value = '#' + fontcolorValue;
+      }
+      if (config.fontsize) {
+        document.getElementById('fontsize').value = config.fontsize;
+      }
+      convert(); // Apply loaded config
     }
   });
 </script>
