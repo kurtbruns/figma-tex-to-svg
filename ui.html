@@ -64,10 +64,20 @@
   }
 
   #output {
-    display: block;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     width: 100%;
     min-height: 72px;
     margin-bottom: 1rem;
+    overflow: auto;
+  }
+
+  #output svg {
+    max-width: 100%;
+    max-height: 100%;
+    width: auto;
+    height: auto;
   }
 
   #settings-panel .settings-grid {
@@ -117,17 +127,91 @@
   #settings-panel #fontsize {
     width: 60px;
   }
+
+  /* Edit mode indicator */
+  #edit-mode-indicator {
+    display: none;
+    padding: 0.5rem 1rem;
+    margin-bottom: 0.5rem;
+    border-radius: 6px;
+    background: var(--settings-panel-background);
+    border: 1px solid var(--settings-panel-border);
+    font-size: 13px;
+    color: var(--font-color);
+  }
+
+  #edit-mode-indicator.visible {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  #edit-mode-indicator .node-info {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  #edit-mode-indicator .node-id {
+    font-family: monospace;
+    font-size: 12px;
+    opacity: 0.8;
+  }
+
+  #edit-mode-indicator .locate-button {
+    background: none;
+    border: 1px solid var(--settings-panel-border);
+    color: var(--font-color);
+    padding: 0.25rem 0.75rem;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    transition: background-color 0.2s;
+  }
+
+  #edit-mode-indicator .locate-button:hover {
+    background: var(--settings-panel-background);
+  }
+
+  /* Preview container - hidden in edit mode */
+  #preview-container {
+    display: block;
+  }
+
+  #preview-container.hidden {
+    display: none;
+  }
+
+  /* Preview header */
+  #preview-header {
+    padding: 0.25rem 0;
+    margin-bottom: 0.5rem;
+  }
+
+  /* Preview output container */
+  #preview-output {
+    overflow: auto;
+  }
+
+  /* Insert button states */
+  #place {
+    transition: opacity 0.2s;
+  }
+
+  #place.hidden {
+    display: none;
+  }
 </style>
 
 <main>
-  <h1>TeX to SVG (Dev)</h1>
+  <h1>TeX to SVG</h1>
   <div class="container">
     <textarea id="input">x=\frac{-b \pm \sqrt{b^2-4 a c}}{2 a}</textarea>
     <br>
     <div id="settings-panel">
       <div class="settings-grid">
         <div>
-          <input type="checkbox" id="display" checked="true" onchange="convert()">
+          <input type="checkbox" id="display" checked="true" onchange="convert();">
           <label for="display">Display style</label>
         </div>
         <div>
@@ -137,7 +221,7 @@
         </div>
         <div>
           <label for="fontsize">Font size</label>
-          <input type="number" id="fontsize" min="8" step="1" placeholder="12" onchange="saveConfig()">
+          <input type="number" id="fontsize" min="8" max="1000" step="1" placeholder="12" onchange="saveConfig(); convert();">
         </div>
         <div>
           <label for="fontcolor">Font</label>
@@ -147,14 +231,30 @@
       </div>
     </div>
     <br clear="all">
-    <label>Preview</label>
-    <div id="output"></div>
+    <div id="edit-mode-indicator" class="">
+      <div class="node-info">
+        <span>Editing node</span>
+        <span class="node-id" id="node-id-display">#</span>
+      </div>
+      <button class="locate-button" id="locate-button">Locate in Figma</button>
+    </div>
+    <div id="preview-container">
+      <div id="preview-header">
+        <label>Preview</label>
+      </div>
+      <div id="preview-output">
+        <div id="output"></div>
+      </div>
+    </div>
   </div>
   <button id="place">Embed</button>
 </main>
 
 <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"></script>
 <script>
+  // Frontend color normalization
+  // Handles all color expansion logic before sending to backend
+  // Backend expects normalized 6-digit hex colors
   // Expand color according to convention:
   // 1 digit -> repeat 6 times (2 -> 222222)
   // 2 digits -> repeat 3 times (20 -> 202020)
@@ -273,6 +373,11 @@
       output.appendChild(node);
       MathJax.startup.document.clear();
       MathJax.startup.document.updateDocument();
+      
+      // Trigger real-time update if node is loaded and we're not just loading data
+      if (!isLoadingNodeData) {
+        debouncedUpdate();
+      }
     }).catch(function (err) {
       output.appendChild(document.createElement('pre')).appendChild(document.createTextNode(err.message));
     }).then(function () {
@@ -286,20 +391,160 @@
   // Add input event listener for auto-render
   document.getElementById('input').addEventListener('input', convert);
 
-  // place the svg on the figma canvas
-  document.getElementById('place').onclick = () => {
+  // Track if we have a node loaded that can be updated
+  let hasNodeLoaded = false;
+  let currentNodeId = null;
+  
+  // Flag to prevent updates when loading node data
+  let isLoadingNodeData = false;
+  
+  // Debounce timer for real-time updates
+  let updateTimer = null;
+
+  // Draft state to preserve unplaced work
+  let draftState = null;
+
+  // Function to save current draft state
+  function saveDraftState() {
+    draftState = {
+      tex: document.getElementById("input").value.trim(),
+      display: document.getElementById("display").checked,
+      bgcolor: document.getElementById("bgcolor").value.trim(),
+      fontcolor: document.getElementById("fontcolor").value.trim(),
+      fontsize: document.getElementById("fontsize").value
+    };
+  }
+
+  // Function to restore draft state
+  function restoreDraftState() {
+    if (draftState) {
+      document.getElementById("input").value = draftState.tex;
+      document.getElementById("display").checked = draftState.display;
+      document.getElementById("bgcolor").value = draftState.bgcolor;
+      document.getElementById("fontcolor").value = draftState.fontcolor;
+      document.getElementById("fontsize").value = draftState.fontsize;
+      
+      // Update color pickers
+      const bgcolorExpanded = expandColor(draftState.bgcolor);
+      const fontcolorExpanded = expandColor(draftState.fontcolor);
+      document.getElementById('bgcolor-picker').value = '#' + bgcolorExpanded;
+      document.getElementById('fontcolor-picker').value = '#' + fontcolorExpanded;
+      
+      // Re-render
+      convert();
+      
+      draftState = null; // Clear after restoring
+    }
+  }
+
+  // Function to switch to edit mode
+  function switchToEditMode(nodeId) {
+    // Save draft state before switching
+    saveDraftState();
+    
+    hasNodeLoaded = true;
+    currentNodeId = nodeId;
+    
+    // Show edit mode indicator
+    const indicator = document.getElementById('edit-mode-indicator');
+    indicator.classList.add('visible');
+    document.getElementById('node-id-display').textContent = '#' + (nodeId ? nodeId.substring(0, 8) : '');
+    
+    // Hide preview in edit mode
+    const previewContainer = document.getElementById('preview-container');
+    previewContainer.classList.add('hidden');
+    
+    // Hide insert button
+    const placeButton = document.getElementById('place');
+    placeButton.classList.add('hidden');
+  }
+
+  // Function to switch to create mode
+  function switchToCreateMode() {
+    hasNodeLoaded = false;
+    currentNodeId = null;
+    
+    // Hide edit mode indicator
+    const indicator = document.getElementById('edit-mode-indicator');
+    indicator.classList.remove('visible');
+    
+    // Show preview in create mode
+    const previewContainer = document.getElementById('preview-container');
+    previewContainer.classList.remove('hidden');
+    
+    // Show insert button
+    const placeButton = document.getElementById('place');
+    placeButton.classList.remove('hidden');
+    
+    // Restore draft state if available
+    restoreDraftState();
+  }
+
+  // Helper function to prepare data for sending to backend
+  // Handles all frontend concerns: color normalization, data extraction
+  function prepareMessageData(updateExisting = false) {
+    const svgElement = document.getElementById('output').firstChild;
+    if (!svgElement) {
+      return null; // No SVG rendered yet
+    }
+    
     const tex = document.getElementById("input").value.trim();
-    const svg = document.getElementById('output').firstChild.innerHTML;
+    const svg = svgElement.innerHTML;
     const fontsizeInput = document.getElementById('fontsize').value;
     const fontsize = fontsizeInput ? parseFloat(fontsizeInput) : 16;
     const bgcolorRaw = document.getElementById("bgcolor").value.trim() || THEME_DEFAULTS[currentTheme].background;
     const fontcolorRaw = document.getElementById("fontcolor").value.trim() || THEME_DEFAULTS[currentTheme].font;
-    // Expand colors and add # prefix for Figma (which expects hex with #)
+    
+    // Normalize colors: expand and add # prefix (backend expects normalized 6-digit hex with #)
     const bgcolor = '#' + expandColor(bgcolorRaw);
     const fontcolor = '#' + expandColor(fontcolorRaw);
+    
     // Calculate scale from font-size (default MathJax font-size is 12px per em)
     const scale = fontsize / 12;
-    parent.postMessage({ pluginMessage: { tex, svg, scale, bgcolor, fontcolor } }, '*');
+    
+    return {
+      tex,
+      svg,
+      scale,
+      bgcolor,  // Normalized 6-digit hex with # prefix
+      fontcolor, // Normalized 6-digit hex with # prefix
+      fontsize,
+      updateExisting
+    };
+  }
+
+  // Function to send update to Figma (with debouncing)
+  function sendUpdateToFigma() {
+    if (!hasNodeLoaded) {
+      return; // Don't update if no node is loaded
+    }
+    
+    const data = prepareMessageData(true);
+    if (!data) {
+      return; // No SVG rendered yet
+    }
+    
+    parent.postMessage({ pluginMessage: data }, '*');
+  }
+
+  // Debounced update function
+  function debouncedUpdate() {
+    if (updateTimer) {
+      clearTimeout(updateTimer);
+    }
+    updateTimer = setTimeout(() => {
+      sendUpdateToFigma();
+    }, 300); // 300ms debounce delay
+  }
+
+  // place the svg on the figma canvas (for new nodes)
+  document.getElementById('place').onclick = () => {
+    const data = prepareMessageData(false);
+    if (!data) {
+      console.error('No SVG to embed');
+      return;
+    }
+    parent.postMessage({ pluginMessage: data }, '*');
   }
 
   // Helper to sync color pickers and text inputs
@@ -310,7 +555,7 @@
     picker.addEventListener('input', () => {
       const expanded = expandColor(picker.value);
       text.value = expanded;
-      convert();
+      convert(); // This will trigger debouncedUpdate via convert()
     });
     // When text changes, update picker (with #) and convert (handled by onColorTextChange)
     const currentValue = text.value.trim() || picker.value.replace(/^#/, '');
@@ -333,7 +578,7 @@
       text.value = expanded.substring(0, 6); // Limit to 6 hex digits for RGB
       // Add # to picker (color inputs need # prefix)
       picker.value = '#' + expanded.substring(0, 6);
-      convert();
+      convert(); // This will trigger debouncedUpdate via convert()
     }
   }
 
@@ -349,8 +594,20 @@
     return theme;
   }
 
+  // Locate button handler
+  document.getElementById('locate-button').onclick = () => {
+    parent.postMessage({ 
+      pluginMessage: { 
+        type: 'locateNode'
+      } 
+    }, '*');
+  };
+
   // On load, detect OS theme and set fallback theme
   window.onload = () => {
+    // Initialize to create mode
+    switchToCreateMode();
+    
     // Detect and apply OS theme
     const detectedTheme = detectAndApplyOSTheme();
     
@@ -409,6 +666,53 @@
         document.getElementById('fontsize').value = config.fontsize;
       }
       convert(); // Apply loaded config
+    }
+    
+    // Handle node data load (when selecting a node with plugin data)
+    if (message.type === 'loadNodeData') {
+      const { texSource, renderOptions, nodeId } = message;
+      
+      // Switch to edit mode
+      switchToEditMode(nodeId);
+      
+      // Load TeX source
+      if (texSource) {
+        document.getElementById('input').value = texSource;
+      }
+      
+      // Load render options
+      if (renderOptions) {
+        if (renderOptions.fontSize) {
+          document.getElementById('fontsize').value = renderOptions.fontSize;
+        }
+        
+        if (renderOptions.fontColor) {
+          // Remove # prefix if present, then expand
+          const fontcolorValue = expandColor(renderOptions.fontColor.replace(/^#/, ''));
+          document.getElementById('fontcolor').value = fontcolorValue;
+          document.getElementById('fontcolor-picker').value = '#' + fontcolorValue;
+        }
+        
+        if (renderOptions.backgroundColor) {
+          // Remove # prefix if present, then expand
+          const bgcolorValue = expandColor(renderOptions.backgroundColor.replace(/^#/, ''));
+          document.getElementById('bgcolor').value = bgcolorValue;
+          document.getElementById('bgcolor-picker').value = '#' + bgcolorValue;
+        }
+      }
+      
+      // Re-render with loaded data (but don't trigger update)
+      isLoadingNodeData = true;
+      convert();
+      // Reset flag after a short delay to allow convert to complete
+      setTimeout(() => {
+        isLoadingNodeData = false;
+      }, 100);
+    }
+    
+    // Handle clearing node data (when no node with plugin data is selected)
+    if (message.type === 'clearNodeData') {
+      switchToCreateMode();
     }
   });
 </script>
