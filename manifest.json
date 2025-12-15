@@ -3,12 +3,12 @@
   "id": "1255629578161025994",
   "api": "1.0.0",
   "main": "dist/code.js",
+  "ui": "dist/ui.html",
   "capabilities": [],
   "enableProposedApi": false,
   "editorType": [
     "figma"
   ],
-  "ui": "ui.html",
   "networkAccess": {
     "allowedDomains": [
       "https://cdn.jsdelivr.net"

@@ -1,4 +1,6 @@
-figma.showUI(__html__)
+// Always use the bundled HTML exposed via Figma's __html__ variable.
+// CSS is inlined in both dev and prod builds, so this works in both modes.
+figma.showUI(__html__);
 
 figma.ui.resize(420, 540);
 
@@ -84,12 +86,12 @@ figma.ui.onmessage = async (pluginMessage) => {
   }
 
   // Helper function to convert normalized hex color to RGB
-  // Expects a 6-digit hex color (with or without # prefix)
-  // Color normalization should be handled by the frontend
+  // Expects a 6-digit hex color with # prefix (e.g., "#FFFFFF")
+  // Color normalization (expansion and # prefix) is handled by the frontend
   function hexToRgb(hex: string): { r: number; g: number; b: number } {
     const c = hex.replace('#', '');
     if (c.length !== 6) {
-      console.warn(`Expected 6-digit hex color, got: ${hex}`);
+      console.warn(`Expected 6-digit hex color with # prefix, got: ${hex}`);
     }
     const num = parseInt(c, 16);
     return { 
@@ -100,13 +102,14 @@ figma.ui.onmessage = async (pluginMessage) => {
   }
 
   // Handle SVG placement or update
-  // Expects normalized data from frontend:
+  // Expects normalized data from frontend (all colors include # prefix):
   // - bgcolor: 6-digit hex with # prefix (e.g., "#FFFFFF")
   // - fontcolor: 6-digit hex with # prefix (e.g., "#000000")
   // - tex: TeX source string
   // - svg: SVG markup string
   // - scale: numeric scale factor
   // - fontsize: numeric font size
+  // - subExpressionStyles: Array with colors normalized with # prefix
   const margin = 4;
   const bgcolor = pluginMessage.bgcolor; // Already normalized by frontend
   

@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>TeX to SVG</title>
+  </head>
+  <body>
+    <main>
+      <h1>TeX to SVG</h1>
+      <div class="container">
+        <textarea id="input">x=\frac{-b \pm \sqrt{b^2-4 a c}}{2 a}</textarea>
+        <br />
+        <div id="settings-panel">
+          <div class="settings-grid">
+            <div>
+              <input type="checkbox" id="display" checked="true" onchange="convert();">
+              <label for="display">Display style</label>
+            </div>
+            <div>
+              <label for="bgcolor">Background</label>
+              <input type="color" id="bgcolor-picker">
+              <input
+                type="text"
+                id="bgcolor"
+                maxlength="6"
+                placeholder="000000"
+                onchange="onColorTextChange('bgcolor')"
+              />
+            </div>
+            <div>
+              <label for="fontsize">Font size</label>
+              <input
+                type="number"
+                id="fontsize"
+                min="8"
+                max="1000"
+                step="1"
+                placeholder="24"
+                onchange="saveConfig(); convert();"
+              />
+            </div>
+            <div>
+              <label for="fontcolor">Font</label>
+              <input type="color" id="fontcolor-picker">
+              <input
+                type="text"
+                id="fontcolor"
+                maxlength="6"
+                placeholder="E0E0E0"
+                onchange="onColorTextChange('fontcolor')"
+              />
+            </div>
+          </div>
+          <div id="subexpression-styling">
+            <div id="subexpression-rows"></div>
+            <button id="add-subexpression-btn" onclick="addSubExpressionRow()">Add sub-expression style</button>
+          </div>
+        </div>
+        <br clear="all" />
+        <div id="edit-mode-indicator" class="">
+          <div class="node-info">
+            <span>Editing node</span>
+            <span class="node-id" id="node-id-display">#</span>
+          </div>
+          <button class="locate-button" id="locate-button">
+            Locate in Figma
+          </button>
+        </div>
+        <div id="preview-container">
+          <div id="preview-header">
+            <label>Preview</label>
+          </div>
+          <div id="preview-output">
+            <div id="output"></div>
+          </div>
+        </div>
+      </div>
+      <button id="place">Embed</button>
+    </main>
+
+    <!-- MathJax from CDN - load synchronously to ensure it's available before our script -->
+    <script
+      id="MathJax-script"
+      src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"
+    ></script>
+    <!-- The bundled UI script will be injected by HtmlWebpackPlugin -->
+  </body>
+</html>
+
+
