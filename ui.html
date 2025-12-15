@@ -59,7 +59,7 @@
   }
 
   #input {
-    height: 160px;
+    height: 120px;
     min-height: 120px;
   }
 
@@ -126,6 +126,103 @@
 
   #settings-panel #fontsize {
     width: 60px;
+  }
+
+  /* Sub-expression styling section */
+  #subexpression-styling {
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--settings-panel-border);
+  }
+
+  #subexpression-styling h3 {
+    margin: 0 0 0.75rem 0;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--font-color);
+  }
+
+  .subexpression-row {
+    display: flex;
+    flex-direction: row;
+    gap: 0.5rem;
+    align-items: center;
+  }
+
+  .subexpression-row > div {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    min-height: 30px;
+    justify-content: center;
+  }
+
+  .subexpression-row > div:nth-child(2) {
+    flex-direction: row;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .subexpression-row input[type="text"] {
+    width: 100%;
+    padding: 0.25rem;
+    font-family: monospace;
+    font-size: 12px;
+    background: var(--background-color);
+    color: var(--font-color);
+    border: 1px solid var(--settings-panel-border);
+    border-radius: 3px;
+  }
+
+  .subexpression-row input[type="color"] {
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    border: 1px solid var(--settings-panel-border);
+    border-radius: 3px;
+    cursor: pointer;
+  }
+
+  .subexpression-row label {
+    font-size: 11px;
+    color: var(--font-color);
+    opacity: 0.8;
+  }
+
+  .subexpression-row .error-message {
+    color: #ff4444;
+    font-size: 11px;
+    margin-top: 0.25rem;
+  }
+
+  .subexpression-row button {
+    background: none;
+    border: 1px solid var(--settings-panel-border);
+    color: var(--font-color);
+    padding: 0.25rem 0.5rem;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 12px;
+    align-self: center;
+  }
+
+  .subexpression-row button:hover {
+    background: var(--settings-panel-background);
+  }
+
+  #add-subexpression-btn {
+    background: var(--settings-panel-background);
+    border: 1px solid var(--settings-panel-border);
+    color: var(--font-color);
+    padding: 0.5rem 1rem;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    margin-top: 0.5rem;
+  }
+
+  #add-subexpression-btn:hover {
+    background: var(--background-color);
   }
 
   /* Edit mode indicator */
@@ -229,6 +326,10 @@
           <input type="text" id="fontcolor" maxlength="6" placeholder="E0E0E0" onchange="onColorTextChange('fontcolor')">
         </div>
       </div>
+      <div id="subexpression-styling">
+        <div id="subexpression-rows"></div>
+        <button id="add-subexpression-btn" onclick="addSubExpressionRow()">Add sub-expression style</button>
+      </div>
     </div>
     <br clear="all">
     <div id="edit-mode-indicator" class="">
@@ -296,6 +397,10 @@
 
   let currentTheme = 'dark'; // fallback
 
+  // Sub-expression styling state
+  let subExpressionStyles = [];
+  let subExpressionRowCounter = 0;
+
   function applyTheme(theme) {
     const defaults = THEME_DEFAULTS[theme] || THEME_DEFAULTS.dark;
     document.getElementById('bgcolor').value = defaults.background;
@@ -316,13 +421,29 @@
     const fontsizeInput = document.getElementById('fontsize').value;
     const fontsize = fontsizeInput ? parseFloat(fontsizeInput) : 24;
     
+    // Collect sub-expression styles
+    const styles = [];
+    document.querySelectorAll('.subexpression-row').forEach((row, index) => {
+      const texInput = row.querySelector('.subexpression-tex');
+      const colorInput = row.querySelector('.subexpression-color');
+      const occurrenceInput = row.querySelector('.subexpression-occurrence');
+      if (texInput && colorInput && occurrenceInput) {
+        styles.push({
+          tex: texInput.value.trim(),
+          color: colorInput.value.trim(),
+          occurrence: occurrenceInput.value.trim()
+        });
+      }
+    });
+    
     parent.postMessage({ 
       pluginMessage: { 
         type: 'saveConfig',
         display,
         bgcolor,
         fontcolor,
-        fontsize
+        fontsize,
+        subExpressionStyles: styles
       } 
     }, '*');
   }
@@ -340,6 +461,424 @@
         el.style.fill = color;
       }
     });
+  }
+
+  // Sub-expression matching logic (similar to Tex.ts)
+  function findSubtreeMatches(root, subtree) {
+    const matches = [];
+
+    function nodeMatches(node, subtreeNode) {
+      if (node.tagName !== subtreeNode.tagName) {
+        return false;
+      }
+      if (node.getAttribute('data-mml-node') !== subtreeNode.getAttribute('data-mml-node')) {
+        return false;
+      }
+      if (node.hasAttribute('data-c') && node.getAttribute('data-c') !== subtreeNode.getAttribute('data-c')) {
+        return false;
+      }
+
+      const nodeChildren = Array.from(node.children);
+      const subtreeChildren = Array.from(subtreeNode.children);
+
+      if (nodeChildren.length !== subtreeChildren.length) {
+        return false;
+      }
+
+      for (let i = 0; i < nodeChildren.length; i++) {
+        if (!nodeMatches(nodeChildren[i], subtreeChildren[i])) {
+          return false;
+        }
+      }
+
+      return true;
+    }
+
+    function traverse(node) {
+      Array.from(node.children).forEach((child, index, children) => {
+        // Check if the child node is a deep match
+        if (nodeMatches(child, subtree)) {
+          matches.push([child]);
+        }
+
+        // Check to see if there is a sequential match
+        let currentChild = child;
+        let currentNode = subtree.firstChild;
+        let potentialMatch = [];
+        let lastMatch = null;
+        while (currentNode && currentChild && nodeMatches(currentChild, currentNode)) {
+          potentialMatch.push(currentChild);
+          lastMatch = currentNode;
+          currentChild = currentChild.nextElementSibling;
+          currentNode = currentNode.nextElementSibling;
+        }
+
+        // If the sequence matched all of the subtrees nodes then its a match
+        if (lastMatch === subtree.lastChild) {
+          matches.push(potentialMatch);
+        }
+      });
+
+      Array.from(node.children).forEach(child => {
+        traverse(child);
+      });
+    }
+
+    traverse(root);
+    return matches;
+  }
+
+  // Helper function to compare document position of two nodes
+  function compareNodePosition(nodeA, nodeB) {
+    if (!nodeA || !nodeB) return 0;
+    
+    // Use compareDocumentPosition for reliable ordering
+    const comparison = nodeA.compareDocumentPosition(nodeB);
+    
+    // If nodeA comes before nodeB, return -1
+    if (comparison & Node.DOCUMENT_POSITION_FOLLOWING) {
+      return -1;
+    }
+    // If nodeA comes after nodeB, return 1
+    if (comparison & Node.DOCUMENT_POSITION_PRECEDING) {
+      return 1;
+    }
+    
+    // Fallback to bounding box comparison if nodes are in different documents
+    const bboxA = nodeA.getBoundingClientRect();
+    const bboxB = nodeB.getBoundingClientRect();
+    // First sort by y (top to bottom), then by x (left to right)
+    if (Math.abs(bboxA.top - bboxB.top) > 1) { // Allow 1px tolerance for "same line"
+      return bboxA.top - bboxB.top;
+    }
+    return bboxA.left - bboxB.left;
+  }
+
+  // Sort matches by document position (left-to-right, top-to-bottom)
+  function sortMatchesByPosition(matches) {
+    return matches.sort((a, b) => {
+      if (a.length === 0 || b.length === 0) {
+        return a.length - b.length;
+      }
+      // Compare the first node of each match
+      return compareNodePosition(a[0], b[0]);
+    });
+  }
+
+  function getMatchesByTex(tex, svgElement) {
+    try {
+      // Render the sub-expression
+      const output = MathJax.tex2svg(tex, {});
+      const matchRendered = output.firstChild;
+
+      // Find the math nodes
+      const tree = svgElement.querySelector('[data-mml-node="math"]');
+      const match = matchRendered.querySelector('[data-mml-node="math"]');
+
+      if (!tree || !match) {
+        return null;
+      }
+
+      const matches = findSubtreeMatches(tree, match);
+      // Sort matches by document position to ensure correct order
+      return sortMatchesByPosition(matches);
+    } catch (err) {
+      console.error('Error matching sub-expression:', err);
+      return null;
+    }
+  }
+
+  function applySubExpressionColors(svgElement, styles) {
+    // Clear previous validation errors
+    clearSubExpressionErrors();
+
+    if (!styles || styles.length === 0) {
+      return;
+    }
+
+    styles.forEach((style, styleIndex) => {
+      const { tex, color, occurrence } = style;
+      
+      if (!tex || !tex.trim()) {
+        return; // Skip empty sub-expressions
+      }
+
+      // Find matches
+      const matches = getMatchesByTex(tex.trim(), svgElement);
+      
+      if (!matches || matches.length === 0) {
+        // Show error: sub-expression not found
+        showSubExpressionError(styleIndex, 'tex', `Sub-expression '${tex}' not found in the TeX`);
+        return;
+      }
+
+      // Normalize color
+      const normalizedColor = '#' + expandColor(color || '000000');
+
+      // Handle occurrence
+      const occurrenceStr = (occurrence || '').trim();
+      
+      if (occurrenceStr === '') {
+        // Apply to all matches
+        matches.forEach(matchedNodes => {
+          matchedNodes.forEach(node => {
+            if (node.style) {
+              node.style.fill = normalizedColor;
+            }
+          });
+        });
+        clearSubExpressionError(styleIndex, 'tex');
+        clearSubExpressionError(styleIndex, 'occurrence');
+      } else {
+        // Parse comma-separated integers (1-based indexing)
+        const occurrenceIndices = occurrenceStr.split(',').map(s => s.trim()).filter(s => s !== '');
+        const parsedIndices = [];
+        let hasError = false;
+        
+        for (const idxStr of occurrenceIndices) {
+          const idx = parseInt(idxStr, 10);
+          if (isNaN(idx)) {
+            showSubExpressionError(styleIndex, 'occurrence', `Invalid occurrence number: '${idxStr}'`);
+            hasError = true;
+            break;
+          }
+          // Convert from 1-based to 0-based for array access
+          const arrayIndex = idx - 1;
+          if (idx < 1 || arrayIndex >= matches.length) {
+            const range = matches.length > 0 ? `1-${matches.length}` : 'none';
+            showSubExpressionError(styleIndex, 'occurrence', `Occurrence ${idx} is out of range. Found ${matches.length} instance(s) (valid range: ${range})`);
+            hasError = true;
+            break;
+          }
+          parsedIndices.push(arrayIndex);
+        }
+
+        if (!hasError) {
+          // Apply to specific occurrences (using 0-based array indices)
+          parsedIndices.forEach(arrayIndex => {
+            if (matches[arrayIndex]) {
+              matches[arrayIndex].forEach(node => {
+                if (node.style) {
+                  node.style.fill = normalizedColor;
+                }
+              });
+            }
+          });
+          clearSubExpressionError(styleIndex, 'tex');
+          clearSubExpressionError(styleIndex, 'occurrence');
+        }
+      }
+    });
+  }
+
+  function showSubExpressionError(rowIndex, field, message) {
+    const row = document.querySelector(`[data-row-index="${rowIndex}"]`);
+    if (row) {
+      const errorDiv = row.querySelector(`.error-${field}`);
+      if (errorDiv) {
+        errorDiv.textContent = message;
+        errorDiv.style.display = 'block';
+      }
+    }
+  }
+
+  function clearSubExpressionError(rowIndex, field) {
+    const row = document.querySelector(`[data-row-index="${rowIndex}"]`);
+    if (row) {
+      const errorDiv = row.querySelector(`.error-${field}`);
+      if (errorDiv) {
+        errorDiv.textContent = '';
+        errorDiv.style.display = 'none';
+      }
+    }
+  }
+
+  function clearSubExpressionErrors() {
+    document.querySelectorAll('.error-message').forEach(el => {
+      el.textContent = '';
+      el.style.display = 'none';
+    });
+  }
+
+  // Sub-expression row management
+  function addSubExpressionRow(style = null) {
+    const rowIndex = subExpressionRowCounter++;
+    const rowsContainer = document.getElementById('subexpression-rows');
+    
+    const row = document.createElement('div');
+    row.className = 'subexpression-row';
+    row.setAttribute('data-row-index', rowIndex);
+
+    const texValue = style ? style.tex : '';
+    const colorValue = style ? style.color : '5DA6F7';
+    const occurrenceValue = style ? style.occurrence : '';
+
+    row.innerHTML = `
+      <div>
+        <input type="text" class="subexpression-tex" placeholder="exp" value="${texValue}" 
+               onchange="updateSubExpressionStyle(${rowIndex})" 
+               oninput="updateSubExpressionStyle(${rowIndex}); convert();">
+        <div class="error-message error-tex" style="display: none;"></div>
+      </div>
+      <div>
+        <input type="color" class="subexpression-color-picker" value="#${expandColor(colorValue)}" 
+               onchange="onSubExpressionColorChange(${rowIndex})">
+        <input type="text" class="subexpression-color" maxlength="6" placeholder="808080" value="${colorValue}" 
+               onchange="onSubExpressionColorTextChange(${rowIndex})" 
+               oninput="onSubExpressionColorTextChange(${rowIndex}); convert();">
+        <div class="error-message error-color" style="display: none;"></div>
+      </div>
+      <div>
+        <input type="text" class="subexpression-occurrence" placeholder="1,3" value="${occurrenceValue}" 
+               onchange="updateSubExpressionStyle(${rowIndex})" 
+               oninput="updateSubExpressionStyle(${rowIndex}); convert();">
+        <div class="error-message error-occurrence" style="display: none;"></div>
+      </div>
+      <button onclick="removeSubExpressionRow(${rowIndex})">−</button>
+    `;
+
+    rowsContainer.appendChild(row);
+    
+    // Initialize the style in the array
+    if (!style) {
+      subExpressionStyles.push({
+        tex: '',
+        color: colorValue,
+        occurrence: ''
+      });
+    } else {
+      subExpressionStyles.push(style);
+    }
+
+    // Sync color picker
+    syncSubExpressionColorInputs(rowIndex);
+  }
+
+  function removeSubExpressionRow(rowIndex) {
+    const row = document.querySelector(`[data-row-index="${rowIndex}"]`);
+    if (row) {
+      row.remove();
+      // Remove from array at the correct index
+      if (rowIndex >= 0 && rowIndex < subExpressionStyles.length) {
+        subExpressionStyles.splice(rowIndex, 1);
+      }
+      // Re-index rows
+      reindexSubExpressionRows();
+      convert();
+    }
+  }
+
+  function reindexSubExpressionRows() {
+    const rows = Array.from(document.querySelectorAll('.subexpression-row'));
+    // Rebuild subExpressionStyles array to match current rows
+    const newStyles = [];
+    rows.forEach((row, newIndex) => {
+      const oldIndex = parseInt(row.getAttribute('data-row-index'));
+      row.setAttribute('data-row-index', newIndex);
+      
+      // Get current values from the row
+      const texInput = row.querySelector('.subexpression-tex');
+      const colorInput = row.querySelector('.subexpression-color');
+      const occurrenceInput = row.querySelector('.subexpression-occurrence');
+      
+      if (oldIndex >= 0 && oldIndex < subExpressionStyles.length) {
+        // Preserve the style data, but update with current input values
+        newStyles.push({
+          tex: texInput ? texInput.value.trim() : (subExpressionStyles[oldIndex].tex || ''),
+          color: colorInput ? colorInput.value.trim() : (subExpressionStyles[oldIndex].color || '808080'),
+          occurrence: occurrenceInput ? occurrenceInput.value.trim() : (subExpressionStyles[oldIndex].occurrence || '')
+        });
+      } else {
+        // New row, get values from inputs
+        newStyles.push({
+          tex: texInput ? texInput.value.trim() : '',
+          color: colorInput ? colorInput.value.trim() : '808080',
+          occurrence: occurrenceInput ? occurrenceInput.value.trim() : ''
+        });
+      }
+      
+      // Update event handlers
+      if (texInput) {
+        texInput.setAttribute('onchange', `updateSubExpressionStyle(${newIndex})`);
+        texInput.setAttribute('oninput', `updateSubExpressionStyle(${newIndex}); convert();`);
+      }
+      if (row.querySelector('.subexpression-color-picker')) {
+        row.querySelector('.subexpression-color-picker').setAttribute('onchange', `onSubExpressionColorChange(${newIndex})`);
+      }
+      if (row.querySelector('.subexpression-color')) {
+        row.querySelector('.subexpression-color').setAttribute('onchange', `onSubExpressionColorTextChange(${newIndex})`);
+        row.querySelector('.subexpression-color').setAttribute('oninput', `onSubExpressionColorTextChange(${newIndex}); convert();`);
+      }
+      if (row.querySelector('.subexpression-occurrence')) {
+        row.querySelector('.subexpression-occurrence').setAttribute('onchange', `updateSubExpressionStyle(${newIndex})`);
+        row.querySelector('.subexpression-occurrence').setAttribute('oninput', `updateSubExpressionStyle(${newIndex}); convert();`);
+      }
+      if (row.querySelector('button')) {
+        row.querySelector('button').setAttribute('onclick', `removeSubExpressionRow(${newIndex})`);
+      }
+    });
+    subExpressionStyles = newStyles;
+  }
+
+  function updateSubExpressionStyle(rowIndex) {
+    const row = document.querySelector(`[data-row-index="${rowIndex}"]`);
+    if (!row) return;
+
+    const texInput = row.querySelector('.subexpression-tex');
+    const colorInput = row.querySelector('.subexpression-color');
+    const occurrenceInput = row.querySelector('.subexpression-occurrence');
+
+    if (!texInput || !colorInput || !occurrenceInput) return;
+
+    // Ensure array has entry at this index
+    if (!subExpressionStyles[rowIndex]) {
+      subExpressionStyles[rowIndex] = { tex: '', color: '808080', occurrence: '' };
+    }
+
+    subExpressionStyles[rowIndex].tex = texInput.value.trim();
+    subExpressionStyles[rowIndex].color = colorInput.value.trim();
+    subExpressionStyles[rowIndex].occurrence = occurrenceInput.value.trim();
+  }
+
+  function onSubExpressionColorChange(rowIndex) {
+    const row = document.querySelector(`[data-row-index="${rowIndex}"]`);
+    if (!row) return;
+
+    const picker = row.querySelector('.subexpression-color-picker');
+    const text = row.querySelector('.subexpression-color');
+    const expanded = expandColor(picker.value);
+    text.value = expanded;
+    updateSubExpressionStyle(rowIndex);
+    convert();
+  }
+
+  function onSubExpressionColorTextChange(rowIndex) {
+    const row = document.querySelector(`[data-row-index="${rowIndex}"]`);
+    if (!row) return;
+
+    const picker = row.querySelector('.subexpression-color-picker');
+    const text = row.querySelector('.subexpression-color');
+    let value = text.value.trim();
+    
+    const expanded = expandColor(value);
+    
+    if (/^[0-9A-Fa-f]{1,6}$/i.test(value)) {
+      text.value = expanded.substring(0, 6);
+      picker.value = '#' + expanded.substring(0, 6);
+      updateSubExpressionStyle(rowIndex);
+    }
+  }
+
+  function syncSubExpressionColorInputs(rowIndex) {
+    const row = document.querySelector(`[data-row-index="${rowIndex}"]`);
+    if (!row) return;
+
+    const picker = row.querySelector('.subexpression-color-picker');
+    const text = row.querySelector('.subexpression-color');
+    const currentValue = text.value.trim() || '808080';
+    const expanded = expandColor(currentValue);
+    text.value = expanded;
+    picker.value = '#' + expanded;
   }
 
   function convert() {
@@ -370,6 +909,10 @@
       setSVGColor(node, fontcolor);
       // Set font-size on the root SVG element (like vector library)
       node.setAttribute('font-size', fontsize + 'px');
+      
+      // Apply sub-expression colors
+      applySubExpressionColors(node, subExpressionStyles);
+      
       output.appendChild(node);
       MathJax.startup.document.clear();
       MathJax.startup.document.updateDocument();
@@ -406,12 +949,27 @@
 
   // Function to save current draft state
   function saveDraftState() {
+    const styles = [];
+    document.querySelectorAll('.subexpression-row').forEach((row) => {
+      const texInput = row.querySelector('.subexpression-tex');
+      const colorInput = row.querySelector('.subexpression-color');
+      const occurrenceInput = row.querySelector('.subexpression-occurrence');
+      if (texInput && colorInput && occurrenceInput) {
+        styles.push({
+          tex: texInput.value.trim(),
+          color: colorInput.value.trim(),
+          occurrence: occurrenceInput.value.trim()
+        });
+      }
+    });
+
     draftState = {
       tex: document.getElementById("input").value.trim(),
       display: document.getElementById("display").checked,
       bgcolor: document.getElementById("bgcolor").value.trim(),
       fontcolor: document.getElementById("fontcolor").value.trim(),
-      fontsize: document.getElementById("fontsize").value
+      fontsize: document.getElementById("fontsize").value,
+      subExpressionStyles: styles
     };
   }
 
@@ -429,6 +987,19 @@
       const fontcolorExpanded = expandColor(draftState.fontcolor);
       document.getElementById('bgcolor-picker').value = '#' + bgcolorExpanded;
       document.getElementById('fontcolor-picker').value = '#' + fontcolorExpanded;
+      
+      // Restore sub-expression styles
+      if (draftState.subExpressionStyles) {
+        // Clear existing rows
+        document.getElementById('subexpression-rows').innerHTML = '';
+        subExpressionStyles = [];
+        subExpressionRowCounter = 0;
+        
+        // Add rows for each style
+        draftState.subExpressionStyles.forEach(style => {
+          addSubExpressionRow(style);
+        });
+      }
       
       // Re-render
       convert();
@@ -502,6 +1073,21 @@
     // Calculate scale from font-size (default MathJax font-size is 12px per em)
     const scale = fontsize / 12;
     
+    // Collect sub-expression styles
+    const styles = [];
+    document.querySelectorAll('.subexpression-row').forEach((row) => {
+      const texInput = row.querySelector('.subexpression-tex');
+      const colorInput = row.querySelector('.subexpression-color');
+      const occurrenceInput = row.querySelector('.subexpression-occurrence');
+      if (texInput && colorInput && occurrenceInput) {
+        styles.push({
+          tex: texInput.value.trim(),
+          color: colorInput.value.trim(),
+          occurrence: occurrenceInput.value.trim()
+        });
+      }
+    });
+    
     return {
       tex,
       svg,
@@ -509,6 +1095,7 @@
       bgcolor,  // Normalized 6-digit hex with # prefix
       fontcolor, // Normalized 6-digit hex with # prefix
       fontsize,
+      subExpressionStyles: styles,
       updateExisting
     };
   }
@@ -665,6 +1252,17 @@
       if (config.fontsize) {
         document.getElementById('fontsize').value = config.fontsize;
       }
+      if (config.subExpressionStyles && Array.isArray(config.subExpressionStyles)) {
+        // Clear existing rows
+        document.getElementById('subexpression-rows').innerHTML = '';
+        subExpressionStyles = [];
+        subExpressionRowCounter = 0;
+        
+        // Add rows for each style
+        config.subExpressionStyles.forEach(style => {
+          addSubExpressionRow(style);
+        });
+      }
       convert(); // Apply loaded config
     }
     
@@ -698,6 +1296,18 @@
           const bgcolorValue = expandColor(renderOptions.backgroundColor.replace(/^#/, ''));
           document.getElementById('bgcolor').value = bgcolorValue;
           document.getElementById('bgcolor-picker').value = '#' + bgcolorValue;
+        }
+        
+        if (renderOptions.subExpressionStyles && Array.isArray(renderOptions.subExpressionStyles)) {
+          // Clear existing rows
+          document.getElementById('subexpression-rows').innerHTML = '';
+          subExpressionStyles = [];
+          subExpressionRowCounter = 0;
+          
+          // Add rows for each style
+          renderOptions.subExpressionStyles.forEach(style => {
+            addSubExpressionRow(style);
+          });
         }
       }
       

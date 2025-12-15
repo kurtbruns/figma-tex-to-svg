@@ -26,6 +26,28 @@ loadAndSendConfig();
 // Track the currently selected node that has plugin data
 let currentNodeWithData: SceneNode | null = null;
 
+function focusViewportOnNodeBottomRight(node: SceneNode) {
+  // Many scene nodes (including GROUP, FRAME, RECTANGLE, etc.) expose width/height.
+  // We use the absoluteTransform matrix to compute the absolute coordinates of the
+  // node's bottom-right corner and then center the viewport on that point.
+  const width = (node as any).width as number | undefined;
+  const height = (node as any).height as number | undefined;
+
+  if (width == null || height == null) {
+    // Fallback: if we can't read width/height, just scroll as usual.
+    figma.viewport.scrollAndZoomIntoView([node]);
+    return;
+  }
+
+  const t = node.absoluteTransform;
+  // Transform local point (width, height) into absolute coordinates:
+  // [x', y'] = [m00*width + m01*height + m02, m10*width + m11*height + m12]
+  const bottomRightX = t[0][0] * width + t[0][1] * height + t[0][2];
+  const bottomRightY = t[1][0] * width + t[1][1] * height + t[1][2];
+
+  figma.viewport.center = { x: bottomRightX, y: bottomRightY };
+}
+
 figma.ui.onmessage = async (pluginMessage) => {
   // Backend responsibilities:
   // - Handle Figma API operations (create/update nodes, manage selection)
@@ -44,6 +66,7 @@ figma.ui.onmessage = async (pluginMessage) => {
         bgcolor: pluginMessage.bgcolor,
         fontcolor: pluginMessage.fontcolor,
         fontsize: pluginMessage.fontsize,
+        subExpressionStyles: pluginMessage.subExpressionStyles || [],
       });
     } catch (err) {
       console.error('Error saving config:', err);
@@ -55,7 +78,7 @@ figma.ui.onmessage = async (pluginMessage) => {
   if (pluginMessage.type === 'locateNode') {
     if (currentNodeWithData) {
       figma.currentPage.selection = [currentNodeWithData];
-      figma.viewport.scrollAndZoomIntoView([currentNodeWithData]);
+      focusViewportOnNodeBottomRight(currentNodeWithData);
     }
     return;
   }
@@ -130,7 +153,8 @@ figma.ui.onmessage = async (pluginMessage) => {
         group.setPluginData("renderOptions", JSON.stringify({
           fontSize: pluginMessage.fontsize || 16,
           fontColor: pluginMessage.fontcolor || "#000000",
-          backgroundColor: pluginMessage.bgcolor || "#FFFFFF"
+          backgroundColor: pluginMessage.bgcolor || "#FFFFFF",
+          subExpressionStyles: pluginMessage.subExpressionStyles || []
         }));
         
         group.name = pluginMessage.tex;
@@ -169,7 +193,8 @@ figma.ui.onmessage = async (pluginMessage) => {
   group.setPluginData("renderOptions", JSON.stringify({
     fontSize: pluginMessage.fontsize || 16,
     fontColor: pluginMessage.fontcolor || "#000000",
-    backgroundColor: pluginMessage.bgcolor || "#FFFFFF"
+    backgroundColor: pluginMessage.bgcolor || "#FFFFFF",
+    subExpressionStyles: pluginMessage.subExpressionStyles || []
   }));
 
   // Update tracked node
