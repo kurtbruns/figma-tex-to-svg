@@ -4,10 +4,11 @@
   "description": "Figma plugin to render TeX as SVG and embed it in a Figma Design Document.",
   "main": "dist/code.js",
   "scripts": {
-    "build": "npm run sync-version && NODE_ENV=production webpack --config webpack.config.js --mode=production",
+    "build": "NODE_ENV=production webpack --config webpack.config.js --mode=production",
     "dev": "concurrently \"npm run watch\" \"http-server dist -p 5173 -o\"",
     "watch": "NODE_ENV=development webpack --config webpack.config.js --mode=development --watch",
-    "sync-version": "node sync-version.js"
+    "sync-version": "node sync-version.js",
+    "postversion": "npm run sync-version"
   },
   "author": "kurtbruns",
   "license": "MIT",

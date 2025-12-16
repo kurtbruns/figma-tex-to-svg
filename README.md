@@ -35,12 +35,14 @@ Before publishing, follow these steps:
    git commit -m "Your commit message"
    ```
 
-2. **Update the version number**: Update the version number after committing changes. This ensures the new version corresponds to the committed changes. The `npm version` command also creates a new Git tag for the new version.
+2. **Update the version number**: Update the version number after committing changes. This ensures the new version corresponds to the committed changes. The `npm version` command also creates a new Git tag for the new version and automatically syncs the version to `manifest.json`.
    ```bash
    npm version patch   # for bug fixes (1.0.1 → 1.0.2)
    npm version minor   # for new features (1.0.1 → 1.1.0)
    npm version major   # for breaking changes (1.0.1 → 2.0.0)
    ```
+
+   This will update `package.json`, sync the version to `manifest.json`, and create a git commit with both changes.
 
 3. **Push changes to the repository**: Push your commits and tags to the remote repository.
    ```bash
@@ -55,7 +57,7 @@ Build the production bundle:
 npm run build
 ```
 
-This will automatically sync the version from `package.json` to `manifest.json` and create optimized files in the `dist/` directory that will be published to Figma.
+This creates optimized files in the `dist/` directory that will be published to Figma.
 
 ### Publishing to Figma
 
