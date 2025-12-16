@@ -1,0 +1,24 @@
+/* Insert/Place button component */
+#place {
+  background: var(--figma-color-bg);
+  color: var(--figma-color-text);
+  border: 1.5px solid var(--figma-color-border);
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background-color 0.2s, opacity 0.2s;
+}
+
+#place:hover {
+  background: var(--figma-color-bg-hover);
+}
+
+#place:active {
+  background: var(--figma-color-bg-secondary);
+}
+
+#place.hidden {
+  display: none;
+}
+

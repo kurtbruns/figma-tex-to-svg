@@ -1,0 +1,45 @@
+/* Edit mode indicator component */
+#edit-mode-indicator {
+  display: none;
+  padding: 0.5rem 1rem;
+  margin-bottom: 0.5rem;
+  border-radius: 6px;
+  background: var(--figma-color-bg-secondary);
+  border: 1px solid var(--figma-color-border);
+  font-size: 13px;
+  color: var(--figma-color-text);
+}
+
+#edit-mode-indicator.visible {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+#edit-mode-indicator .node-info {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+#edit-mode-indicator .node-id {
+  font-family: monospace;
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+#edit-mode-indicator .locate-button {
+  background: none;
+  border: 1px solid var(--figma-color-border);
+  color: var(--figma-color-text);
+  padding: 0.25rem 0.75rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: background-color 0.2s;
+}
+
+#edit-mode-indicator .locate-button:hover {
+  background: var(--figma-color-bg-hover);
+}
+

@@ -1,0 +1,64 @@
+/* Preview component */
+#preview-container {
+  display: block;
+  margin-bottom: 0.5rem;
+}
+
+#preview-header {
+  padding: 0.5rem 0.75rem;
+  cursor: default;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  user-select: none;
+  transition: background-color 0.2s;
+}
+
+#preview-toggle {
+  display: inline-block;
+  font-family: monospace;
+  font-size: 12px;
+  color: var(--figma-color-text);
+  width: 12px;
+  text-align: center;
+  transform: rotate(0deg);
+}
+
+#preview-container.expanded #preview-toggle {
+  transform: rotate(90deg);
+}
+
+#preview-output {
+  max-height: 0;
+  overflow: hidden;
+}
+
+#preview-container.expanded #preview-output {
+  max-height: 500px;
+  padding: 0.5rem;
+  overflow: auto;
+}
+
+#preview-output.collapsed {
+  max-height: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+#output {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 72px;
+  margin-bottom: 1rem;
+  overflow: auto;
+}
+
+#output svg {
+  max-width: 100%;
+  max-height: 100%;
+  width: auto;
+  height: auto;
+}
+
