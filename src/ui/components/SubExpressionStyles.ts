@@ -1,35 +1,39 @@
 /**
- * Sub-expression styles UI component
+ * Sub-expression styles component
  * Handles DOM rendering and user interaction for sub-expression styling
+ * Reads/writes directly to StateStore
  */
 
-import { SubExpressionStylesManager } from './subExpressionStyles';
-import { SubExpressionStyle } from './types';
-import { SubExpressionErrorCallbacks } from './mathRenderer';
-import { expandColor, getNextSubExpressionColor } from './utils';
+import { StateStore } from '../core/StateStore';
+import { SubExpressionStyle } from '../types';
+import { SubExpressionErrorCallbacks } from '../mathRenderer';
+import { expandColor, getNextSubExpressionColor } from '../utils';
 
 /**
- * UI component for managing sub-expression styles
+ * Component for managing sub-expression styles
  */
-export class SubExpressionStylesUI {
-  private manager: SubExpressionStylesManager;
+export class SubExpressionStyles {
+  private stateStore: StateStore;
   private container: HTMLElement;
   private addButton: HTMLButtonElement;
   private errorCallbacks?: SubExpressionErrorCallbacks;
   private onChangeCallback?: () => void;
   private onDirectStylingUpdateCallback?: () => void;
   private getTheme: () => string;
+  private unsubscribe: (() => void) | null = null;
+  private activeColorPickers: Set<HTMLInputElement> = new Set(); // Track active color pickers
+  private existingRows: Map<number, HTMLElement> = new Map(); // Track existing rows by index
 
   constructor(
     container: HTMLElement,
-    manager: SubExpressionStylesManager,
+    stateStore: StateStore,
     errorCallbacks?: SubExpressionErrorCallbacks,
     onChangeCallback?: () => void,
     getTheme?: () => string,
     onDirectStylingUpdateCallback?: () => void
   ) {
     this.container = container;
-    this.manager = manager;
+    this.stateStore = stateStore;
     this.errorCallbacks = errorCallbacks;
     this.onChangeCallback = onChangeCallback;
     this.onDirectStylingUpdateCallback = onDirectStylingUpdateCallback;
@@ -54,30 +58,150 @@ export class SubExpressionStylesUI {
 
     this.addButton.onclick = () => this.onAdd();
 
-    this.render();
+    // Subscribe to state changes with incremental updates
+    let lastStyles: SubExpressionStyle[] = [];
+    this.unsubscribe = this.stateStore.subscribe((state) => {
+      const currentStyles = state.renderOptions.subExpressionStyles;
+      
+      // Structural change: length changed (add/remove rows)
+      if (currentStyles.length !== lastStyles.length) {
+        this.render(currentStyles);
+        lastStyles = currentStyles.map(s => ({ ...s }));
+        return;
+      }
+      
+      // Value change: update rows in place
+      currentStyles.forEach((style, index) => {
+        const oldStyle = lastStyles[index];
+        if (oldStyle && JSON.stringify(oldStyle) !== JSON.stringify(style)) {
+          const row = this.existingRows.get(index);
+          if (row) {
+            this.updateRowInPlace(row, style, index);
+          }
+        }
+      });
+      
+      lastStyles = currentStyles.map(s => ({ ...s }));
+    });
+
+    // Initial render
+    const state = this.stateStore.getState();
+    lastStyles = state.renderOptions.subExpressionStyles;
+    this.render(state.renderOptions.subExpressionStyles);
   }
 
   /**
-   * Render the UI from the manager state
+   * Get styles from state store
    */
-  render(): void {
-    const rowsContainer = this.container.querySelector('#subexpression-rows') as HTMLDivElement;
-    if (!rowsContainer) return;
+  private getStyles(): SubExpressionStyle[] {
+    return this.stateStore.getState().renderOptions.subExpressionStyles;
+  }
 
-    // Clear existing rows
-    rowsContainer.innerHTML = '';
-
-    // Render each style
-    const styles = this.manager.getAll();
-    styles.forEach((style, index) => {
-      this.renderRow(rowsContainer, style, index);
+  /**
+   * Update styles in state store
+   */
+  private updateStyles(styles: SubExpressionStyle[]): void {
+    const state = this.stateStore.getState();
+    this.stateStore.updateState({
+      renderOptions: {
+        ...state.renderOptions,
+        subExpressionStyles: styles
+      }
     });
   }
 
   /**
-   * Render a single row
+   * Render the UI from styles array (incremental updates)
    */
-  private renderRow(container: HTMLElement, style: SubExpressionStyle, index: number): void {
+  render(styles: SubExpressionStyle[]): void {
+    const rowsContainer = this.container.querySelector('#subexpression-rows') as HTMLDivElement;
+    if (!rowsContainer) return;
+
+    const currentRowIndices = new Set<number>();
+    const existingRowElements = new Map<number, HTMLElement>();
+
+    // Collect existing rows
+    Array.from(rowsContainer.querySelectorAll('.subexpression-row')).forEach((row) => {
+      const index = parseInt((row as HTMLElement).getAttribute('data-row-index') || '-1');
+      if (index >= 0) {
+        currentRowIndices.add(index);
+        existingRowElements.set(index, row as HTMLElement);
+      }
+    });
+
+    const newRowIndices = new Set(styles.map((_, index) => index));
+
+    // Remove rows that no longer exist
+    currentRowIndices.forEach((index) => {
+      if (!newRowIndices.has(index)) {
+        const row = existingRowElements.get(index);
+        if (row) {
+          // Clean up active color picker tracking
+          const picker = row.querySelector('.subexpression-color-picker') as HTMLInputElement;
+          if (picker) {
+            this.activeColorPickers.delete(picker);
+          }
+          row.remove();
+          this.existingRows.delete(index);
+        }
+      }
+    });
+
+    // Update existing rows and create new ones
+    styles.forEach((style, index) => {
+      const existingRow = existingRowElements.get(index);
+      if (existingRow) {
+        // Update existing row in place
+        this.updateRowInPlace(existingRow, style, index);
+      } else {
+        // Create new row
+        const newRow = this.createRow(rowsContainer, style, index);
+        this.existingRows.set(index, newRow);
+      }
+    });
+  }
+
+  /**
+   * Update a row in place without destroying it
+   */
+  private updateRowInPlace(row: HTMLElement, style: SubExpressionStyle, index: number): void {
+    // Update data-row-index in case index changed
+    row.setAttribute('data-row-index', index.toString());
+
+    const texInput = row.querySelector('.subexpression-tex') as HTMLInputElement;
+    const colorPicker = row.querySelector('.subexpression-color-picker') as HTMLInputElement;
+    const colorText = row.querySelector('.subexpression-color') as HTMLInputElement;
+    const occurrenceInput = row.querySelector('.subexpression-occurrence') as HTMLInputElement;
+
+    // Update expression
+    if (texInput && texInput.value !== style.expression) {
+      texInput.value = style.expression;
+    }
+
+    // Update color (only if picker is not active)
+    const colorValueRaw = style.color.replace(/^#/, '') || '5DA6F7';
+    const colorValue = expandColor(colorValueRaw);
+    
+    if (colorText && colorText.value !== colorValue) {
+      colorText.value = colorValue;
+    }
+    
+    // Only update color picker if it's not currently active
+    if (colorPicker && !this.activeColorPickers.has(colorPicker) && colorPicker.value !== '#' + colorValue) {
+      colorPicker.value = '#' + colorValue;
+    }
+
+    // Update occurrences
+    const occurrenceValue = style.occurrences || '';
+    if (occurrenceInput && occurrenceInput.value !== occurrenceValue) {
+      occurrenceInput.value = occurrenceValue;
+    }
+  }
+
+  /**
+   * Create a new row
+   */
+  private createRow(container: HTMLElement, style: SubExpressionStyle, index: number): HTMLElement {
     const row = document.createElement('div');
     row.className = 'subexpression-row';
     row.setAttribute('data-row-index', index.toString());
@@ -114,6 +238,17 @@ export class SubExpressionStylesUI {
     const occurrenceInput = row.querySelector('.subexpression-occurrence') as HTMLInputElement;
     const removeButton = row.querySelector('button') as HTMLButtonElement;
 
+    // Track color picker focus/blur to prevent closing dialog during interaction
+    if (colorPicker) {
+      colorPicker.addEventListener('focus', () => {
+        this.activeColorPickers.add(colorPicker);
+      });
+
+      colorPicker.addEventListener('blur', () => {
+        this.activeColorPickers.delete(colorPicker);
+      });
+    }
+
     texInput.addEventListener('change', () => this.onUpdate(index, 'expression', texInput.value.trim()));
     texInput.addEventListener('input', () => {
       this.onUpdate(index, 'expression', texInput.value.trim());
@@ -124,7 +259,7 @@ export class SubExpressionStylesUI {
       const expanded = expandColor(colorPicker.value);
       colorText.value = expanded;
       this.onUpdate(index, 'color', '#' + expanded);
-      // Directly update styling from manager state (bypass DOM sync for immediate update)
+      // Directly update styling from state store (bypass DOM sync for immediate update)
       this.onDirectStylingUpdateCallback?.();
     });
 
@@ -166,57 +301,24 @@ export class SubExpressionStylesUI {
     removeButton.addEventListener('click', () => this.onRemove(index));
 
     container.appendChild(row);
-  }
-
-  /**
-   * Sync manager state from UI inputs
-   */
-  syncFromUI(): void {
-    const rows = Array.from(this.container.querySelectorAll('.subexpression-row'));
-    const styles: SubExpressionStyle[] = [];
-
-    rows.forEach((row) => {
-      const texInput = row.querySelector('.subexpression-tex') as HTMLInputElement;
-      const colorInput = row.querySelector('.subexpression-color') as HTMLInputElement;
-      const occurrenceInput = row.querySelector('.subexpression-occurrence') as HTMLInputElement;
-
-      if (texInput && colorInput && occurrenceInput) {
-        // Normalize color: expand and add # prefix
-        const normalizedColor = '#' + expandColor(colorInput.value.trim());
-        styles.push({
-          expression: texInput.value.trim(),
-          color: normalizedColor,
-          occurrences: occurrenceInput.value.trim() || undefined
-        });
-      }
-    });
-
-    // Update manager
-    this.manager.clear();
-    styles.forEach(style => this.manager.add(style));
-  }
-
-  /**
-   * Sync UI from manager state
-   */
-  syncToUI(): void {
-    this.render();
+    return row;
   }
 
   /**
    * Handle add button click
    */
   onAdd(): void {
-    const currentCount = this.manager.getCount();
+    const styles = this.getStyles();
     const theme = this.getTheme();
-    const nextColor = getNextSubExpressionColor(theme, currentCount);
+    const nextColor = getNextSubExpressionColor(theme, styles.length);
     
-    this.manager.add({
+    const newStyles = [...styles, {
       expression: '',
       color: nextColor,
       occurrences: undefined
-    });
-    this.render();
+    }];
+    
+    this.updateStyles(newStyles);
     this.onChangeCallback?.();
   }
 
@@ -224,8 +326,9 @@ export class SubExpressionStylesUI {
    * Handle remove button click
    */
   onRemove(index: number): void {
-    this.manager.remove(index);
-    this.render();
+    const styles = this.getStyles();
+    const newStyles = styles.filter((_, i) => i !== index);
+    this.updateStyles(newStyles);
     this.onChangeCallback?.();
   }
 
@@ -233,19 +336,23 @@ export class SubExpressionStylesUI {
    * Handle field update
    */
   private onUpdate(index: number, field: string, value: string): void {
-    const style = this.manager.get(index);
+    const styles = this.getStyles();
+    const style = styles[index];
     if (!style) return;
 
+    const newStyles = [...styles];
     if (field === 'expression') {
-      this.manager.update(index, { expression: value });
+      newStyles[index] = { ...style, expression: value };
       this.errorCallbacks?.clearError?.(index, 'tex');
     } else if (field === 'color') {
-      this.manager.update(index, { color: value });
+      newStyles[index] = { ...style, color: value };
       this.errorCallbacks?.clearError?.(index, 'color');
     } else if (field === 'occurrences') {
-      this.manager.update(index, { occurrences: value || undefined });
+      newStyles[index] = { ...style, occurrences: value || undefined };
       this.errorCallbacks?.clearError?.(index, 'occurrence');
     }
+    
+    this.updateStyles(newStyles);
   }
 
   /**
@@ -299,6 +406,19 @@ export class SubExpressionStylesUI {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+  }
+
+  /**
+   * Cleanup - unsubscribe from state store
+   */
+  destroy(): void {
+    if (this.unsubscribe) {
+      this.unsubscribe();
+      this.unsubscribe = null;
+    }
+    // Clean up active color pickers tracking
+    this.activeColorPickers.clear();
+    this.existingRows.clear();
   }
 }
 

@@ -24,8 +24,8 @@
   font-family: monospace;
 }
 
-#settings-panel label[for="bgcolor"],
-#settings-panel label[for="fontcolor"] {
+#settings-panel label[for="background-color"],
+#settings-panel label[for="font-color"] {
   width: 80px;
 }
 
@@ -46,13 +46,13 @@
   padding: 0.25rem;
 }
 
-#settings-panel #bgcolor,
-#settings-panel #fontcolor {
+#settings-panel #background-color,
+#settings-panel #font-color {
   width: 80px;
   margin-left: 0.5rem;
 }
 
-#settings-panel #fontsize {
+#settings-panel #font-size {
   width: 60px;
 }
 
