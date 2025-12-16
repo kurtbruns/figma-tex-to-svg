@@ -35,14 +35,14 @@ Before publishing, follow these steps:
    git commit -m "Your commit message"
    ```
 
-2. **Update the version number**: Update the version number after committing changes. This ensures the new version corresponds to the committed changes. The `npm version` command also creates a new Git tag for the new version and automatically syncs the version to `manifest.json`.
+2. **Update the version number**: Update the version number after committing changes. This ensures the new version corresponds to the committed changes. The `npm version` command also creates a new Git tag for the new version.
    ```bash
    npm version patch   # for bug fixes (1.0.1 → 1.0.2)
    npm version minor   # for new features (1.0.1 → 1.1.0)
    npm version major   # for breaking changes (1.0.1 → 2.0.0)
    ```
 
-   This will update `package.json`, sync the version to `manifest.json`, and create a git commit with both changes.
+   This will update `package.json` and create a git commit with the version change.
 
 3. **Push changes to the repository**: Push your commits and tags to the remote repository.
    ```bash
@@ -69,7 +69,7 @@ After committing changes, updating the version, and building, publish to Figma:
 4. **Click** the `...` menu next to your plugin
 5. **Select** `Publish` or `Publish new version`
 6. **Fill in** the version details:
-   - Version number (should match the version in `package.json` and `manifest.json`)
+   - Version number (should match the version in `package.json`)
    - Release notes describing the changes
 7. **Click** `Publish`
 

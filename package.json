@@ -6,9 +6,7 @@
   "scripts": {
     "build": "NODE_ENV=production webpack --config webpack.config.js --mode=production",
     "dev": "concurrently \"npm run watch\" \"http-server dist -p 5173 -o\"",
-    "watch": "NODE_ENV=development webpack --config webpack.config.js --mode=development --watch",
-    "sync-version": "node sync-version.js",
-    "version": "npm run sync-version"
+    "watch": "NODE_ENV=development webpack --config webpack.config.js --mode=development --watch"
   },
   "author": "kurtbruns",
   "license": "MIT",
