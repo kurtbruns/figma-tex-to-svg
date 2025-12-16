@@ -1,6 +1,6 @@
 // Always use the bundled HTML exposed via Figma's __html__ variable.
 // CSS is inlined in both dev and prod builds, so this works in both modes.
-figma.showUI(__html__);
+figma.showUI(__html__, { themeColors: true });
 
 figma.ui.resize(420, 540);
 
@@ -154,6 +154,7 @@ figma.ui.onmessage = async (pluginMessage) => {
         // Update plugin data
         group.setPluginData("texSource", pluginMessage.tex);
         group.setPluginData("renderOptions", JSON.stringify({
+          display: pluginMessage.display !== undefined ? pluginMessage.display : true,
           fontSize: pluginMessage.fontsize || 16,
           fontColor: pluginMessage.fontcolor || "#000000",
           backgroundColor: pluginMessage.bgcolor || "#FFFFFF",
@@ -194,6 +195,7 @@ figma.ui.onmessage = async (pluginMessage) => {
   // Store plugin data on the group
   group.setPluginData("texSource", pluginMessage.tex);
   group.setPluginData("renderOptions", JSON.stringify({
+    display: pluginMessage.display !== undefined ? pluginMessage.display : true,
     fontSize: pluginMessage.fontsize || 16,
     fontColor: pluginMessage.fontcolor || "#000000",
     backgroundColor: pluginMessage.bgcolor || "#FFFFFF",

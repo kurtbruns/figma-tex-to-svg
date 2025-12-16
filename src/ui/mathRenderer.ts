@@ -248,7 +248,6 @@ export function applySubExpressionColors(
       // Apply to all matches
       matches.forEach(matchedNodes => {
         matchedNodes.forEach(node => {
-          console.log('node', node);
           if ((node as HTMLElement).style) {
             (node as HTMLElement).style.fill = normalizedColor;
           }

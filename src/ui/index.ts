@@ -157,11 +157,13 @@ function addSubExpressionRow(style: {tex: string, color: string, occurrence: str
              onchange="onSubExpressionColorChange(${rowIndex})">
       <input type="text" class="subexpression-color" maxlength="6" placeholder="808080" value="${colorValue}" 
              onchange="onSubExpressionColorTextChange(${rowIndex})" 
-             oninput="onSubExpressionColorTextInput(${rowIndex}); convert();">
+             oninput="onSubExpressionColorTextInput(${rowIndex}); convert();"
+             onfocus="selectAllText(event)"
+             onmousedown="selectAllText(event)">
       <div class="error-message error-color" style="display: none;"></div>
     </div>
     <div>
-      <input type="text" class="subexpression-occurrence" placeholder="1,3" value="${occurrenceValue}" 
+      <input type="text" class="subexpression-occurrence" placeholder="1,2 ..." value="${occurrenceValue}" 
              onchange="updateSubExpressionStyle(${rowIndex})" 
              oninput="updateSubExpressionStyle(${rowIndex}); convert();">
       <div class="error-message error-occurrence" style="display: none;"></div>
@@ -514,11 +516,9 @@ function switchToEditMode(nodeId: string) {
   // Show edit mode indicator
   const indicator = document.getElementById('edit-mode-indicator') as HTMLDivElement;
   indicator.classList.add('visible');
-  (document.getElementById('node-id-display') as HTMLSpanElement).textContent = '#' + (nodeId ? nodeId.substring(0, 8) : '');
   
-  // Hide preview in edit mode
-  const previewContainer = document.getElementById('preview-container') as HTMLDivElement;
-  previewContainer.classList.add('hidden');
+  // Preview is always visible now (collapsed by default)
+  // No need to hide it
   
   // Hide insert button
   const placeButton = document.getElementById('place') as HTMLButtonElement;
@@ -534,9 +534,11 @@ function switchToCreateMode() {
   const indicator = document.getElementById('edit-mode-indicator') as HTMLDivElement;
   indicator.classList.remove('visible');
   
-  // Show preview in create mode
+  // Show preview expanded in create mode
   const previewContainer = document.getElementById('preview-container') as HTMLDivElement;
-  previewContainer.classList.remove('hidden');
+  const previewOutput = document.getElementById('preview-output') as HTMLDivElement;
+  previewContainer.classList.add('expanded');
+  previewOutput.classList.remove('collapsed');
   
   // Show insert button
   const placeButton = document.getElementById('place') as HTMLButtonElement;
@@ -558,7 +560,6 @@ function prepareMessageData(updateExisting = false) {
   // Extract the actual SVG element from inside the wrapper
   const wrapper = outputElement.firstChild as Element;
   const svgElement = wrapper.querySelector('svg');
-  console.log('svgElement', svgElement);
   if (!svgElement || svgElement.tagName !== 'svg') {
     return null; // No SVG found
   }
@@ -566,6 +567,7 @@ function prepareMessageData(updateExisting = false) {
   const tex = (document.getElementById("input") as HTMLTextAreaElement).value.trim();
   // Use outerHTML to get the complete SVG element (not just innerHTML)
   const svg = svgElement.outerHTML;
+  const display = (document.getElementById("display") as HTMLInputElement).checked;
   const fontsizeInput = (document.getElementById('fontsize') as HTMLInputElement).value;
   const fontsize = fontsizeInput ? parseFloat(fontsizeInput) : 16;
   const bgcolorRaw = (document.getElementById("bgcolor") as HTMLInputElement).value.trim() || (THEME_DEFAULTS as any)[currentTheme].background;
@@ -599,10 +601,11 @@ function prepareMessageData(updateExisting = false) {
     tex,
     svg,
     scale,
-    bgcolor,  // Normalized 6-digit hex with # prefix (e.g., "#FFFFFF")
-    fontcolor, // Normalized 6-digit hex with # prefix (e.g., "#000000")
+    display,
+    bgcolor,
+    fontcolor,
     fontsize,
-    subExpressionStyles: styles, // Colors normalized with # prefix
+    subExpressionStyles: styles,
     updateExisting
   };
 }
@@ -697,6 +700,33 @@ function detectAndApplyOSTheme() {
   }, '*');
 };
 
+// Helper function to reliably select all text in an input
+function selectAllText(event: FocusEvent | MouseEvent) {
+  const target = event.target as HTMLInputElement;
+  // Prevent default mouseup behavior that might interfere with selection
+  if (event.type === 'mousedown' || event.type === 'click') {
+    event.preventDefault();
+  }
+  // Use setTimeout to ensure selection happens after browser's default focus behavior
+  setTimeout(() => {
+    target.select();
+  }, 0);
+}
+
+// Function to toggle preview expand/collapse
+function togglePreview() {
+  const previewContainer = document.getElementById('preview-container') as HTMLDivElement;
+  const previewOutput = document.getElementById('preview-output') as HTMLDivElement;
+  
+  if (previewContainer.classList.contains('expanded')) {
+    previewContainer.classList.remove('expanded');
+    previewOutput.classList.add('collapsed');
+  } else {
+    previewContainer.classList.add('expanded');
+    previewOutput.classList.remove('collapsed');
+  }
+}
+
 // Make functions available globally for inline handlers
 (window as any).convert = convert;
 (window as any).addSubExpressionRow = addSubExpressionRow;
@@ -707,11 +737,13 @@ function detectAndApplyOSTheme() {
 (window as any).onSubExpressionColorTextInput = onSubExpressionColorTextInput;
 (window as any).onSubExpressionColorTextChange = onSubExpressionColorTextChange;
 (window as any).removeSubExpressionRow = removeSubExpressionRow;
+(window as any).selectAllText = selectAllText;
+(window as any).togglePreview = togglePreview;
 
 // Initialize the plugin - handle both DOMContentLoaded and window.onload for compatibility
 function initializePlugin() {
 
-  // Initialize to create mode
+  // Initialize to create mode (this will also expand the preview)
   switchToCreateMode();
   
   // Detect and apply OS theme
@@ -816,6 +848,10 @@ window.addEventListener('message', (event: MessageEvent) => {
     
     // Load render options
     if (renderOptions) {
+      if (renderOptions.display !== undefined) {
+        (document.getElementById('display') as HTMLInputElement).checked = renderOptions.display;
+      }
+      
       if (renderOptions.fontSize) {
         (document.getElementById('fontsize') as HTMLInputElement).value = renderOptions.fontSize;
       }

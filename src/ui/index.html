@@ -6,15 +6,14 @@
   </head>
   <body>
     <main>
-      <h1>TeX to SVG</h1>
+      <h1>Math: TeX to SVG</h1>
       <div class="container">
         <textarea id="input">x=\frac{-b \pm \sqrt{b^2-4 a c}}{2 a}</textarea>
-        <br />
         <div id="settings-panel">
           <div class="settings-grid">
             <div>
-              <input type="checkbox" id="display" checked="true" onchange="convert();">
               <label for="display">Display style</label>
+              <input type="checkbox" id="display" checked="true" onchange="convert();">
             </div>
             <div>
               <label for="bgcolor">Background</label>
@@ -25,6 +24,8 @@
                 maxlength="6"
                 placeholder="000000"
                 onchange="onColorTextChange('bgcolor')"
+                onfocus="selectAllText(event)"
+                onmousedown="selectAllText(event)"
               />
             </div>
             <div>
@@ -37,10 +38,12 @@
                 step="1"
                 placeholder="24"
                 onchange="saveConfig(); convert();"
+                onfocus="selectAllText(event)"
+                onmousedown="selectAllText(event)"
               />
             </div>
             <div>
-              <label for="fontcolor">Font</label>
+              <label for="fontcolor">Font color</label>
               <input type="color" id="fontcolor-picker">
               <input
                 type="text"
@@ -48,6 +51,8 @@
                 maxlength="6"
                 placeholder="E0E0E0"
                 onchange="onColorTextChange('fontcolor')"
+                onfocus="selectAllText(event)"
+                onmousedown="selectAllText(event)"
               />
             </div>
           </div>
@@ -56,26 +61,25 @@
             <button id="add-subexpression-btn" onclick="addSubExpressionRow()">Add sub-expression style</button>
           </div>
         </div>
-        <br clear="all" />
         <div id="edit-mode-indicator" class="">
           <div class="node-info">
-            <span>Editing node</span>
-            <span class="node-id" id="node-id-display">#</span>
+            <span>Editing math expression</span>
           </div>
           <button class="locate-button" id="locate-button">
             Locate in Figma
           </button>
         </div>
-        <div id="preview-container">
-          <div id="preview-header">
-            <label>Preview</label>
-          </div>
-          <div id="preview-output">
-            <div id="output"></div>
-          </div>
-        </div>
       </div>
       <button id="place">Embed</button>
+      <div id="preview-container">
+        <div id="preview-header" onclick="togglePreview()">
+          <span id="preview-toggle">></span>
+          <label>Preview</label>
+        </div>
+        <div id="preview-output" class="collapsed">
+          <div id="output"></div>
+        </div>
+      </div>
     </main>
 
     <!-- MathJax from CDN - load synchronously to ensure it's available before our script -->

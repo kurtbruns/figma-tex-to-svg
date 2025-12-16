@@ -94,9 +94,10 @@ module.exports = (env, argv) => {
       // Use the generated ui.html as the default index for the dev server
       devMiddleware: {
         index: 'ui.html',
+        writeToDisk: true,
       },
       port: 5173,
-      hot: true,
+      hot: false,
       compress: true,
       allowedHosts: 'all',
     },

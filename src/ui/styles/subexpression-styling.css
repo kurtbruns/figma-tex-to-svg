@@ -1,0 +1,97 @@
+/* Sub-expression styling component */
+#subexpression-styling {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--figma-color-border);
+}
+
+#subexpression-styling h3 {
+  margin: 0 0 0.75rem 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--figma-color-text);
+}
+
+.subexpression-row {
+  display: flex;
+  flex-direction: row;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.subexpression-row > div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-height: 30px;
+  justify-content: center;
+}
+
+.subexpression-row > div:nth-child(2) {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.subexpression-row input[type="text"] {
+  width: 100%;
+  padding: 0.25rem;
+  font-family: monospace;
+  font-size: 12px;
+  background: var(--figma-color-bg);
+  color: var(--figma-color-text);
+  border: 1px solid var(--figma-color-border);
+  border-radius: 3px;
+}
+
+.subexpression-row input[type="color"] {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid var(--figma-color-border);
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.subexpression-row label {
+  font-size: 11px;
+  color: var(--figma-color-text);
+  opacity: 0.8;
+}
+
+.subexpression-row .error-message {
+  color: var(--figma-color-text-danger);
+  font-size: 11px;
+  margin-top: 0.25rem;
+}
+
+.subexpression-row button {
+  background: none;
+  border: 1px solid var(--figma-color-border);
+  color: var(--figma-color-text);
+  padding: 0.25rem 0.5rem;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 12px;
+  align-self: center;
+}
+
+.subexpression-row button:hover {
+  background: var(--figma-color-bg-hover);
+}
+
+#add-subexpression-btn {
+  background: var(--figma-color-bg-secondary);
+  border: 1px solid var(--figma-color-border);
+  color: var(--figma-color-text);
+  padding: 0.5rem 1rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  margin-top: 0.5rem;
+}
+
+#add-subexpression-btn:hover {
+  background: var(--figma-color-bg-hover);
+}
+

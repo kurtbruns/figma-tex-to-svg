@@ -1,0 +1,12 @@
+/* Input component styles */
+textarea {
+  background: var(--figma-color-bg);
+  color: var(--figma-color-text);
+  resize: vertical;
+}
+
+#input {
+  height: 120px;
+  min-height: 120px;
+}
+

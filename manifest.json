@@ -9,6 +9,7 @@
   "editorType": [
     "figma"
   ],
+  "documentAccess": "dynamic-page",
   "networkAccess": {
     "allowedDomains": [
       "https://cdn.jsdelivr.net"
