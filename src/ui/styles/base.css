@@ -5,7 +5,7 @@ html {
   font-size: 13px;
 }
 
-label {
+label, span {
   color: var(--figma-color-text);
   font-size: 13px;
 }
