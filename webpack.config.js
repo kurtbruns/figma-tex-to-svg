@@ -4,6 +4,7 @@ const MiniCssExtractPlugin = require('mini-css-extract-plugin');
 const HtmlInlineCssWebpackPlugin = require('html-inline-css-webpack-plugin').default;
 const HtmlInlineScriptPlugin = require('html-inline-script-webpack-plugin');
 
+
 module.exports = (env, argv) => {
   const isProd = argv.mode === 'production';
 
@@ -71,36 +72,21 @@ module.exports = (env, argv) => {
     plugins: [
       new HtmlWebpackPlugin({
         template: path.resolve(__dirname, 'src/ui/index.html'),
-        filename: 'ui.html',
+        filename: 'index.html',
         inject: 'body', // Inject scripts at the end of <body> where the comment indicates
-        scriptLoading: 'blocking', // Don't use defer - we need to control execution order
+        scriptLoading: 'blocking',
         minify: isProd,
       }),
       // Extract CSS and inline it (works in both dev and prod)
+      // No content hash needed since CSS is inlined into HTML
       new MiniCssExtractPlugin({
-        filename: 'ui.[contenthash].css',
+        filename: 'ui.css',
       }),
       // Inline the extracted CSS into the HTML
       new HtmlInlineCssWebpackPlugin(),
       // Inline JavaScript into the HTML (required for Figma plugins)
       new HtmlInlineScriptPlugin(),
     ],
-    devServer: {
-      static: {
-        directory: path.resolve(__dirname, 'dist'),
-        // Don't show a directory listing; serve the app instead
-        serveIndex: false,
-      },
-      // Use the generated ui.html as the default index for the dev server
-      devMiddleware: {
-        index: 'ui.html',
-        writeToDisk: true,
-      },
-      port: 5173,
-      hot: false,
-      compress: true,
-      allowedHosts: 'all',
-    },
   };
 
   // Multi-compiler export: run both builds together

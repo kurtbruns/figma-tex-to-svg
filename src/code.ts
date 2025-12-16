@@ -4,15 +4,15 @@ figma.showUI(__html__, { themeColors: true });
 
 figma.ui.resize(420, 540);
 
-// Load and send saved config to UI
-async function loadAndSendConfig() {
+// Load and send saved user preferences to UI
+async function loadAndSendUserPreferences() {
   try {
-    const config = await figma.clientStorage.getAsync('config');
-    if (config) {
-      figma.ui.postMessage({ type: 'loadConfig', config });
+    const userPreferences = await figma.clientStorage.getAsync('userPreferences');
+    if (userPreferences) {
+      figma.ui.postMessage({ type: 'loadUserPreferences', userPreferences });
     }
   } catch (err) {
-    console.error('Error loading config:', err);
+    console.error('Error loading user preferences:', err);
   }
 }
 
@@ -22,8 +22,8 @@ if ('uiTheme' in figma) {
   figma.ui.postMessage({ theme: figma.uiTheme });
 }
 
-// Load saved config on initialization
-loadAndSendConfig();
+// Load saved user preferences on initialization
+loadAndSendUserPreferences();
 
 // Track the currently selected node that has plugin data
 let currentNodeWithData: SceneNode | null = null;
@@ -60,18 +60,19 @@ figma.ui.onmessage = async (pluginMessage) => {
   // - Color normalization and validation
   // - Data preparation and formatting before sending to backend
 
-  // Handle config save
-  if (pluginMessage.type === 'saveConfig') {
+  // Handle user preferences save
+  if (pluginMessage.type === 'saveUserPreferences') {
     try {
-      await figma.clientStorage.setAsync('config', {
+      await figma.clientStorage.setAsync('userPreferences', {
+        tex: pluginMessage.tex,
         display: pluginMessage.display,
-        bgcolor: pluginMessage.bgcolor,
-        fontcolor: pluginMessage.fontcolor,
-        fontsize: pluginMessage.fontsize,
+        backgroundColor: pluginMessage.backgroundColor,
+        fontColor: pluginMessage.fontColor,
+        fontSize: pluginMessage.fontSize,
         subExpressionStyles: pluginMessage.subExpressionStyles || [],
       });
     } catch (err) {
-      console.error('Error saving config:', err);
+      console.error('Error saving user preferences:', err);
     }
     return;
   }
@@ -158,7 +159,11 @@ figma.ui.onmessage = async (pluginMessage) => {
           fontSize: pluginMessage.fontsize || 16,
           fontColor: pluginMessage.fontcolor || "#000000",
           backgroundColor: pluginMessage.bgcolor || "#FFFFFF",
-          subExpressionStyles: pluginMessage.subExpressionStyles || []
+          subExpressionStyles: (pluginMessage.subExpressionStyles || []).map((style: any) => ({
+            expression: style.expression || style.tex || '',
+            color: style.color || '#000000',
+            occurrences: style.occurrences !== undefined ? style.occurrences : style.occurrence
+          }))
         }));
         
         group.name = pluginMessage.tex;
@@ -199,7 +204,11 @@ figma.ui.onmessage = async (pluginMessage) => {
     fontSize: pluginMessage.fontsize || 16,
     fontColor: pluginMessage.fontcolor || "#000000",
     backgroundColor: pluginMessage.bgcolor || "#FFFFFF",
-    subExpressionStyles: pluginMessage.subExpressionStyles || []
+    subExpressionStyles: (pluginMessage.subExpressionStyles || []).map((style: any) => ({
+      expression: style.expression || style.tex || '',
+      color: style.color || '#000000',
+      occurrences: style.occurrences !== undefined ? style.occurrences : style.occurrence
+    }))
   }));
 
   // Update tracked node

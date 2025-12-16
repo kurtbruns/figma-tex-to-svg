@@ -1,6 +1,8 @@
 // Math rendering and SVG manipulation utilities
 // This module handles all MathJax rendering and SVG styling logic
 
+import { SubExpressionStyle } from './types';
+
 // Declare MathJax types for TypeScript
 declare global {
   interface Window {
@@ -25,7 +27,7 @@ export interface TypesettingOptions {
   display: boolean;
   fontSize: number;
   fontColor: string; // Expected to be normalized 6-digit hex with # prefix (e.g., "#FFFFFF")
-  subExpressionStyles: Array<{ tex: string, color: string, occurrence: string }>; // Colors expected to be normalized with # prefix
+  subExpressionStyles: SubExpressionStyle[]; // Colors expected to be normalized with # prefix
   outputElement?: HTMLElement; // Optional output element for MathJax metrics
   subExpressionErrorCallbacks?: SubExpressionErrorCallbacks; // Optional error callbacks for sub-expression styling
 }
@@ -198,7 +200,7 @@ export function getMatchesByTex(tex: string, svgElement: HTMLElement): Element[]
  */
 export function applySubExpressionColors(
   svgElement: HTMLElement,
-  styles: Array<{ tex: string, color: string, occurrence: string }>,
+  styles: SubExpressionStyle[],
   errorCallbacks?: SubExpressionErrorCallbacks,
   expandColor?: (hex: string) => string
 ): void {
@@ -212,18 +214,18 @@ export function applySubExpressionColors(
   }
 
   styles.forEach((style, styleIndex) => {
-    const { tex, color, occurrence } = style;
+    const { expression, color, occurrences } = style;
 
-    if (!tex || !tex.trim()) {
+    if (!expression || !expression.trim()) {
       return; // Skip empty sub-expressions
     }
 
     // Find matches
-    const matches = getMatchesByTex(tex.trim(), svgElement);
+    const matches = getMatchesByTex(expression.trim(), svgElement);
     if (!matches || matches.length === 0) {
       // Show error: sub-expression not found
       if (errorCallbacks?.showError) {
-        errorCallbacks.showError(styleIndex, 'tex', `Sub-expression '${tex}' not found in the TeX`);
+        errorCallbacks.showError(styleIndex, 'tex', `Sub-expression '${expression}' not found in the TeX`);
       }
       return;
     }
@@ -241,8 +243,8 @@ export function applySubExpressionColors(
       }
     }
 
-    // Handle occurrence
-    const occurrenceStr = (occurrence || '').trim();
+    // Handle occurrences
+    const occurrenceStr = (occurrences || '').trim();
 
     if (occurrenceStr === '') {
       // Apply to all matches

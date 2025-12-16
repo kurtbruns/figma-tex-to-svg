@@ -1,56 +1,24 @@
 // Entry point for the UI when served via webpack-dev-server.
 // This file contains the logic originally in ui.html's inline <script> block.
 
-import './styles.css';
-import { typesetMath, TypesettingOptions, SubExpressionErrorCallbacks } from './mathRenderer';
-
-// Frontend color normalization
-// Handles all color expansion logic before sending to backend
-// Backend expects normalized 6-digit hex colors with # prefix (e.g., "#FFFFFF")
-// Expand color according to convention:
-// 1 digit -> repeat 6 times (2 -> 222222)
-// 2 digits -> repeat 3 times (20 -> 202020)
-// 3 digits -> duplicate each digit (123 -> 112233)
-// All colors sent to backend must include # prefix
-function expandColor(hex: string): string {
-  if (!hex) return '';
-  // Remove # if present and convert to uppercase
-  const cleaned = hex.replace(/^#/, '').toUpperCase();
-  if (cleaned.length === 1) {
-    // 1 digit -> repeat 6 times
-    return cleaned.repeat(6);
-  } else if (cleaned.length === 2) {
-    // 2 digits -> repeat 3 times
-    return cleaned.repeat(3);
-  } else if (cleaned.length === 3) {
-    // 3 digits -> duplicate each digit
-    return cleaned.split('').map(c => c + c).join('');
-  }
-  // 4+ digits -> return as is (should be 6 for RGB)
-  return cleaned;
-}
-
-// Theme defaults in one place (without # prefix)
-const THEME_DEFAULTS = {
-  window: {
-    background: '38464F',
-    font: 'E0E0E0',
-  },
-  dark: {
-    background: '000000',
-    font: 'E0E0E0',
-  },
-  light: {
-    background: 'FFFFFF',
-    font: '222222',
-  },
-};
+import './styles/main.css';
+import { typesetMath, TypesettingOptions, SubExpressionErrorCallbacks, setSVGColor, applySubExpressionColors } from './mathRenderer';
+import { SubExpressionStylesManager } from './subExpressionStyles';
+import { SubExpressionStylesUI } from './subExpressionStylesUI';
+import { collectRenderOptionsFromUI, applyRenderOptionsToUI } from './renderOptions';
+import { RenderOptions, UserPreferences, SubExpressionStyle } from './types';
+import { expandColor, THEME_DEFAULTS } from './utils';
 
 let currentTheme: string = 'dark'; // fallback
 
-// Sub-expression styling state
-let subExpressionStyles: Array<{tex: string, color: string, occurrence: string}> = [];
-let subExpressionRowCounter = 0;
+// Sub-expression styling manager and UI
+const subExpressionManager = new SubExpressionStylesManager();
+let subExpressionUI: SubExpressionStylesUI | null = null;
+
+// Track render state for optimization
+let lastRenderedTex: string | null = null;
+let lastRenderedDisplay: boolean | null = null;
+let currentSVGWrapper: HTMLElement | null = null;
 
 function applyTheme(theme: string) {
   const defaults = (THEME_DEFAULTS as any)[theme] || THEME_DEFAULTS.dark;
@@ -62,326 +30,156 @@ function applyTheme(theme: string) {
   currentTheme = theme;
 }
 
-function saveConfig() {
-  const display = (document.getElementById("display") as HTMLInputElement).checked;
-  const bgcolorRaw = (document.getElementById("bgcolor") as HTMLInputElement).value.trim() || (THEME_DEFAULTS as any)[currentTheme].background;
-  const fontcolorRaw = (document.getElementById("fontcolor") as HTMLInputElement).value.trim() || (THEME_DEFAULTS as any)[currentTheme].font;
-  // Expand colors and add # prefix (backend expects normalized 6-digit hex with #)
-  const bgcolor = '#' + expandColor(bgcolorRaw);
-  const fontcolor = '#' + expandColor(fontcolorRaw);
-  const fontsizeInput = (document.getElementById('fontsize') as HTMLInputElement).value;
-  const fontsize = fontsizeInput ? parseFloat(fontsizeInput) : 24;
+function saveUserPreferences() {
+  // Sync UI state to manager before collecting
+  subExpressionUI?.syncFromUI();
   
-  // Collect sub-expression styles (normalize colors with # prefix)
-  const styles: Array<{tex: string, color: string, occurrence: string}> = [];
-  document.querySelectorAll('.subexpression-row').forEach((row) => {
-    const texInput = row.querySelector('.subexpression-tex') as HTMLInputElement;
-    const colorInput = row.querySelector('.subexpression-color') as HTMLInputElement;
-    const occurrenceInput = row.querySelector('.subexpression-occurrence') as HTMLInputElement;
-    if (texInput && colorInput && occurrenceInput) {
-      // Normalize color: expand and add # prefix
-      const normalizedColor = '#' + expandColor(colorInput.value.trim());
-      styles.push({
-        tex: texInput.value.trim(),
-        color: normalizedColor,
-        occurrence: occurrenceInput.value.trim()
-      });
-    }
-  });
+  const options = collectRenderOptionsFromUI(subExpressionManager, currentTheme);
   
   (window.parent as Window).postMessage({ 
     pluginMessage: { 
-      type: 'saveConfig',
-      display,
-      bgcolor,
-      fontcolor,
-      fontsize,
-      subExpressionStyles: styles
+      type: 'saveUserPreferences',
+      ...options
     } 
   }, '*');
 }
 
+// Error callbacks for sub-expression styling (delegated to UI component)
 function showSubExpressionError(rowIndex: number, field: string, message: string) {
-  const row = document.querySelector(`[data-row-index="${rowIndex}"]`);
-  if (row) {
-    const errorDiv = row.querySelector(`.error-${field}`) as HTMLElement;
-    if (errorDiv) {
-      errorDiv.textContent = message;
-      errorDiv.style.display = 'block';
-    }
-  }
+  // mathRenderer uses 'tex' field name, but UI component handles both 'tex' and 'expression'
+  subExpressionUI?.showError(rowIndex, field, message);
 }
 
 function clearSubExpressionError(rowIndex: number, field: string) {
-  const row = document.querySelector(`[data-row-index="${rowIndex}"]`);
-  if (row) {
-    const errorDiv = row.querySelector(`.error-${field}`) as HTMLElement;
-    if (errorDiv) {
-      errorDiv.textContent = '';
-      errorDiv.style.display = 'none';
-    }
-  }
+  // mathRenderer uses 'tex' field name, but UI component handles both 'tex' and 'expression'
+  subExpressionUI?.clearError(rowIndex, field);
 }
 
 function clearSubExpressionErrors() {
-  document.querySelectorAll('.error-message').forEach((el) => {
-    (el as HTMLElement).textContent = '';
-    (el as HTMLElement).style.display = 'none';
-  });
+  subExpressionUI?.clearAllErrors();
 }
 
-// Sub-expression row management
-function addSubExpressionRow(style: {tex: string, color: string, occurrence: string} | null = null) {
-  const rowIndex = subExpressionRowCounter++;
-  const rowsContainer = document.getElementById('subexpression-rows') as HTMLDivElement;
-  
-  const row = document.createElement('div');
-  row.className = 'subexpression-row';
-  row.setAttribute('data-row-index', rowIndex.toString());
+// Sub-expression row management functions removed - now handled by SubExpressionStylesUI component
 
-  const texValue = style ? style.tex : '';
-  // Normalize color: strip # prefix if present, then expand (text inputs don't have #)
-  const colorValueRaw = style ? style.color.replace(/^#/, '') : '5DA6F7';
-  const colorValue = expandColor(colorValueRaw);
-  const occurrenceValue = style ? style.occurrence : '';
-
-  row.innerHTML = `
-    <div>
-      <input type="text" class="subexpression-tex" placeholder="exp" value="${texValue}" 
-             onchange="updateSubExpressionStyle(${rowIndex})" 
-             oninput="updateSubExpressionStyle(${rowIndex}); convert();">
-      <div class="error-message error-tex" style="display: none;"></div>
-    </div>
-    <div>
-      <input type="color" class="subexpression-color-picker" value="#${colorValue}" 
-             onchange="onSubExpressionColorChange(${rowIndex})">
-      <input type="text" class="subexpression-color" maxlength="6" placeholder="808080" value="${colorValue}" 
-             onchange="onSubExpressionColorTextChange(${rowIndex})" 
-             oninput="onSubExpressionColorTextInput(${rowIndex}); convert();"
-             onfocus="selectAllText(event)"
-             onmousedown="selectAllText(event)">
-      <div class="error-message error-color" style="display: none;"></div>
-    </div>
-    <div>
-      <input type="text" class="subexpression-occurrence" placeholder="1,2 ..." value="${occurrenceValue}" 
-             onchange="updateSubExpressionStyle(${rowIndex})" 
-             oninput="updateSubExpressionStyle(${rowIndex}); convert();">
-      <div class="error-message error-occurrence" style="display: none;"></div>
-    </div>
-    <button onclick="removeSubExpressionRow(${rowIndex})">−</button>
-  `;
-
-  rowsContainer.appendChild(row);
-  
-  // Initialize the style in the array (store normalized color without # for text input)
-  if (!style) {
-    subExpressionStyles.push({
-      tex: '',
-      color: colorValue,
-      occurrence: ''
-    });
-  } else {
-    // Store normalized color (without # prefix for consistency with text input)
-    subExpressionStyles.push({
-      tex: style.tex,
-      color: colorValue,
-      occurrence: style.occurrence
-    });
-  }
-
-  // Sync color picker
-  syncSubExpressionColorInputs(rowIndex);
+/**
+ * Gets the SVG element from the wrapper node
+ */
+function getSVGElement(wrapper: HTMLElement): HTMLElement | null {
+  const svgElement = wrapper.querySelector('svg');
+  return svgElement ? (svgElement as unknown as HTMLElement) : null;
 }
 
-function removeSubExpressionRow(rowIndex: number) {
-  const row = document.querySelector(`[data-row-index="${rowIndex}"]`);
-  if (row) {
-    row.remove();
-    // Remove from array at the correct index
-    if (rowIndex >= 0 && rowIndex < subExpressionStyles.length) {
-      subExpressionStyles.splice(rowIndex, 1);
-    }
-    // Re-index rows
-    reindexSubExpressionRows();
-    convert();
+/**
+ * Updates font color on existing SVG without re-rendering
+ */
+function updateFontColor(color: string): void {
+  if (!currentSVGWrapper) return;
+  const svgElement = getSVGElement(currentSVGWrapper);
+  if (svgElement) {
+    setSVGColor(svgElement, color);
   }
 }
 
-function reindexSubExpressionRows() {
-  const rows = Array.from(document.querySelectorAll('.subexpression-row'));
-  // Rebuild subExpressionStyles array to match current rows
-  const newStyles: Array<{tex: string, color: string, occurrence: string}> = [];
-  rows.forEach((row, newIndex) => {
-    const oldIndex = parseInt(row.getAttribute('data-row-index') || '0');
-    row.setAttribute('data-row-index', newIndex.toString());
-    
-    // Get current values from the row
-    const texInput = row.querySelector('.subexpression-tex') as HTMLInputElement;
-    const colorInput = row.querySelector('.subexpression-color') as HTMLInputElement;
-    const occurrenceInput = row.querySelector('.subexpression-occurrence') as HTMLInputElement;
-    
-    if (oldIndex >= 0 && oldIndex < subExpressionStyles.length) {
-      // Preserve the style data, but update with current input values
-      newStyles.push({
-        tex: texInput ? texInput.value.trim() : (subExpressionStyles[oldIndex].tex || ''),
-        color: colorInput ? colorInput.value.trim() : (subExpressionStyles[oldIndex].color || '808080'),
-        occurrence: occurrenceInput ? occurrenceInput.value.trim() : (subExpressionStyles[oldIndex].occurrence || '')
-      });
-    } else {
-      // New row, get values from inputs
-      newStyles.push({
-        tex: texInput ? texInput.value.trim() : '',
-        color: colorInput ? colorInput.value.trim() : '808080',
-        occurrence: occurrenceInput ? occurrenceInput.value.trim() : ''
-      });
-    }
-    
-    // Update event handlers
-    if (texInput) {
-      texInput.setAttribute('onchange', `updateSubExpressionStyle(${newIndex})`);
-      texInput.setAttribute('oninput', `updateSubExpressionStyle(${newIndex}); convert();`);
-    }
-    const colorPicker = row.querySelector('.subexpression-color-picker') as HTMLInputElement;
-    if (colorPicker) {
-      colorPicker.setAttribute('onchange', `onSubExpressionColorChange(${newIndex})`);
-    }
-    const colorText = row.querySelector('.subexpression-color') as HTMLInputElement;
-    if (colorText) {
-      colorText.setAttribute('onchange', `onSubExpressionColorTextChange(${newIndex})`);
-      colorText.setAttribute('oninput', `onSubExpressionColorTextInput(${newIndex}); convert();`);
-    }
-    const occurrenceInputEl = row.querySelector('.subexpression-occurrence') as HTMLInputElement;
-    if (occurrenceInputEl) {
-      occurrenceInputEl.setAttribute('onchange', `updateSubExpressionStyle(${newIndex})`);
-      occurrenceInputEl.setAttribute('oninput', `updateSubExpressionStyle(${newIndex}); convert();`);
-    }
-    const button = row.querySelector('button') as HTMLButtonElement;
-    if (button) {
-      button.setAttribute('onclick', `removeSubExpressionRow(${newIndex})`);
-    }
-  });
-  subExpressionStyles = newStyles;
+/**
+ * Updates font size on existing SVG without re-rendering
+ */
+function updateFontSize(fontSize: number): void {
+  if (!currentSVGWrapper) return;
+  currentSVGWrapper.setAttribute('font-size', fontSize + 'px');
 }
 
-function updateSubExpressionStyle(rowIndex: number) {
-  const row = document.querySelector(`[data-row-index="${rowIndex}"]`);
-  if (!row) return;
-
-  const texInput = row.querySelector('.subexpression-tex') as HTMLInputElement;
-  const colorInput = row.querySelector('.subexpression-color') as HTMLInputElement;
-  const occurrenceInput = row.querySelector('.subexpression-occurrence') as HTMLInputElement;
-
-  if (!texInput || !colorInput || !occurrenceInput) return;
-
-  // Ensure array has entry at this index
-  if (!subExpressionStyles[rowIndex]) {
-    subExpressionStyles[rowIndex] = { tex: '', color: '808080', occurrence: '' };
-  }
-
-  subExpressionStyles[rowIndex].tex = texInput.value.trim();
-  subExpressionStyles[rowIndex].color = colorInput.value.trim();
-  subExpressionStyles[rowIndex].occurrence = occurrenceInput.value.trim();
-}
-
-function onSubExpressionColorChange(rowIndex: number) {
-  const row = document.querySelector(`[data-row-index="${rowIndex}"]`);
-  if (!row) return;
-
-  const picker = row.querySelector('.subexpression-color-picker') as HTMLInputElement;
-  const text = row.querySelector('.subexpression-color') as HTMLInputElement;
-  const expanded = expandColor(picker.value);
-  text.value = expanded;
-  updateSubExpressionStyle(rowIndex);
-  convert();
-}
-
-// Handle color text input (on every keystroke) - only sync picker, don't expand
-function onSubExpressionColorTextInput(rowIndex: number) {
-  const row = document.querySelector(`[data-row-index="${rowIndex}"]`);
-  if (!row) return;
-
-  const picker = row.querySelector('.subexpression-color-picker') as HTMLInputElement;
-  const text = row.querySelector('.subexpression-color') as HTMLInputElement;
-  const value = text.value.trim();
-  
-  // Only update picker if value is valid hex, but don't expand the text input
-  if (/^[0-9A-Fa-f]{1,6}$/i.test(value)) {
-    // Expand for picker only (picker needs 6 digits)
-    const expanded = expandColor(value);
-    picker.value = '#' + expanded.substring(0, 6);
+/**
+ * Updates background color on output container
+ */
+function updateBackgroundColor(color: string): void {
+  const output = document.getElementById('output') as HTMLDivElement;
+  if (output) {
+    output.style.background = color;
   }
 }
 
-// Handle color text change (on Enter/blur) - expand the color
-function onSubExpressionColorTextChange(rowIndex: number) {
-  const row = document.querySelector(`[data-row-index="${rowIndex}"]`);
-  if (!row) return;
-
-  const picker = row.querySelector('.subexpression-color-picker') as HTMLInputElement;
-  const text = row.querySelector('.subexpression-color') as HTMLInputElement;
-  const value = text.value.trim();
-  
-  // Expand color according to convention
-  const expanded = expandColor(value);
-  
-  // Validate: should be 1-6 hex digits
-  if (/^[0-9A-Fa-f]{1,6}$/i.test(value)) {
-    // Update text with expanded value (without #)
-    text.value = expanded.substring(0, 6);
-    // Add # to picker (color inputs need # prefix)
-    picker.value = '#' + expanded.substring(0, 6);
-    updateSubExpressionStyle(rowIndex);
+/**
+ * Updates sub-expression styles on existing SVG without re-rendering
+ */
+function updateSubExpressionStyles(styles: SubExpressionStyle[]): void {
+  if (!currentSVGWrapper) return;
+  const svgElement = getSVGElement(currentSVGWrapper);
+  if (svgElement) {
+    const errorCallbacks: SubExpressionErrorCallbacks = {
+      showError: showSubExpressionError,
+      clearError: clearSubExpressionError,
+      clearAllErrors: clearSubExpressionErrors
+    };
+    applySubExpressionColors(svgElement, styles, errorCallbacks);
   }
 }
 
-function syncSubExpressionColorInputs(rowIndex: number) {
-  const row = document.querySelector(`[data-row-index="${rowIndex}"]`);
-  if (!row) return;
-
-  const picker = row.querySelector('.subexpression-color-picker') as HTMLInputElement;
-  const text = row.querySelector('.subexpression-color') as HTMLInputElement;
-  const currentValue = text.value.trim() || '808080';
-  const expanded = expandColor(currentValue);
-  text.value = expanded;
-  picker.value = '#' + expanded;
+/**
+ * Updates styling on existing SVG without re-rendering MathJax
+ */
+function updateStyling(): void {
+  // Sync UI state to manager before collecting
+  subExpressionUI?.syncFromUI();
+  
+  // Collect render options using unified function
+  const options = collectRenderOptionsFromUI(subExpressionManager, currentTheme);
+  
+  // Update styling properties
+  updateBackgroundColor(options.backgroundColor);
+  updateFontColor(options.fontColor);
+  updateFontSize(options.fontSize);
+  updateSubExpressionStyles(options.subExpressionStyles);
+  
+  // Trigger real-time update if node is loaded and we're not just loading data
+  if (!isLoadingNodeData) {
+    debouncedUpdate();
+  }
+  
+  // Save user preferences after update
+  saveUserPreferences();
 }
 
-function convert() {
-  //  Get the TeX input
-  const input = (document.getElementById("input") as HTMLTextAreaElement).value.trim();
-  const bgcolorRaw = (document.getElementById("bgcolor") as HTMLInputElement).value.trim() || (THEME_DEFAULTS as any)[currentTheme].background;
-  const fontcolorRaw = (document.getElementById("fontcolor") as HTMLInputElement).value.trim() || (THEME_DEFAULTS as any)[currentTheme].font;
-  // Expand colors and add # prefix for CSS usage
-  const bgcolor = '#' + expandColor(bgcolorRaw);
-  const fontcolor = '#' + expandColor(fontcolorRaw);
-  //  Disable the display button until MathJax is done
+/**
+ * Updates sub-expression styles directly from manager state (bypasses DOM sync)
+ * Used for real-time color picker updates
+ */
+function updateSubExpressionStylesDirectly(): void {
+  if (!currentSVGWrapper) return;
+  
+  // Get styles directly from manager (already up to date)
+  const styles = subExpressionManager.getAll();
+  
+  // Update sub-expression styles
+  updateSubExpressionStyles(styles);
+  
+  // Trigger real-time update if node is loaded and we're not just loading data
+  if (!isLoadingNodeData) {
+    debouncedUpdate();
+  }
+  
+  // Save user preferences after update
+  saveUserPreferences();
+}
+
+/**
+ * Full MathJax re-render (only when TeX or display mode changes)
+ */
+function renderMath(): void {
+  // Sync UI state to manager before collecting
+  subExpressionUI?.syncFromUI();
+  
+  // Collect render options using unified function
+  const options = collectRenderOptionsFromUI(subExpressionManager, currentTheme);
+  
+  // Disable the display button until MathJax is done
   const display = document.getElementById("display") as HTMLInputElement;
   display.disabled = true;
-  //  Clear the old output
+  
+  // Clear the old output
   const output = document.getElementById('output') as HTMLDivElement;
   output.innerHTML = '';
-  output.style.background = bgcolor;
-  
-  // Get font-size
-  const fontsizeInput = (document.getElementById('fontsize') as HTMLInputElement).value;
-  const fontsize = fontsizeInput ? parseFloat(fontsizeInput) : 12;
-  
-  // Collect sub-expression styles from DOM inputs (normalize colors with # prefix)
-  const normalizedSubExpressionStyles: Array<{tex: string, color: string, occurrence: string}> = [];
-  document.querySelectorAll('.subexpression-row').forEach((row) => {
-    const texInput = row.querySelector('.subexpression-tex') as HTMLInputElement;
-    const colorInput = row.querySelector('.subexpression-color') as HTMLInputElement;
-    const occurrenceInput = row.querySelector('.subexpression-occurrence') as HTMLInputElement;
-    if (texInput && colorInput && occurrenceInput) {
-      // Normalize color: expand and add # prefix
-      const normalizedColor = '#' + expandColor(colorInput.value.trim());
-      normalizedSubExpressionStyles.push({
-        tex: texInput.value.trim(),
-        color: normalizedColor,
-        occurrence: occurrenceInput.value.trim()
-      });
-    }
-  });
+  output.style.background = options.backgroundColor;
+  currentSVGWrapper = null;
   
   // Create error callbacks for UI integration
   const errorCallbacks: SubExpressionErrorCallbacks = {
@@ -392,18 +190,23 @@ function convert() {
   
   // Prepare typesetting options
   const typesettingOptions: TypesettingOptions = {
-    display: display.checked,
-    fontSize: fontsize,
-    fontColor: fontcolor,
-    subExpressionStyles: normalizedSubExpressionStyles,
+    display: options.display,
+    fontSize: options.fontSize,
+    fontColor: options.fontColor,
+    subExpressionStyles: options.subExpressionStyles,
     outputElement: output,
     subExpressionErrorCallbacks: errorCallbacks
   };
   
   // Use the high-level typesetting function
-  typesetMath(input, typesettingOptions)
+  typesetMath(options.tex, typesettingOptions)
     .then((node: HTMLElement) => {
       output.appendChild(node);
+      currentSVGWrapper = node;
+      
+      // Update tracked state
+      lastRenderedTex = options.tex;
+      lastRenderedDisplay = options.display;
       
       // Trigger real-time update if node is loaded and we're not just loading data
       if (!isLoadingNodeData) {
@@ -412,13 +215,38 @@ function convert() {
     })
     .catch((err: Error) => {
       output.appendChild(document.createElement('pre')).appendChild(document.createTextNode(err.message));
+      currentSVGWrapper = null;
+      lastRenderedTex = null;
+      lastRenderedDisplay = null;
     })
     .finally(() => {
       display.disabled = false;
     });
   
-  // Save config after conversion
-  saveConfig();
+  // Save user preferences after conversion
+  saveUserPreferences();
+}
+
+/**
+ * Smart dispatcher that decides between full render or styling update
+ */
+function convert() {
+  // Sync UI state to manager before collecting
+  subExpressionUI?.syncFromUI();
+  
+  // Collect render options using unified function
+  const options = collectRenderOptionsFromUI(subExpressionManager, currentTheme);
+  
+  // Check if we need a full re-render
+  const texChanged = lastRenderedTex !== options.tex;
+  const displayChanged = lastRenderedDisplay !== options.display;
+  const needsRender = texChanged || displayChanged || !currentSVGWrapper;
+  
+  if (needsRender) {
+    renderMath();
+  } else {
+    updateStyling();
+  }
 }
 
 // Add input event listener for auto-render
@@ -435,72 +263,20 @@ let isLoadingNodeData = false;
 let updateTimer: ReturnType<typeof setTimeout> | null = null;
 
 // Draft state to preserve unplaced work
-let draftState: {
-  tex: string;
-  display: boolean;
-  bgcolor: string;
-  fontcolor: string;
-  fontsize: string;
-  subExpressionStyles: Array<{tex: string, color: string, occurrence: string}>;
-} | null = null;
+let draftState: RenderOptions | null = null;
 
 // Function to save current draft state
 function saveDraftState() {
-  const styles: Array<{tex: string, color: string, occurrence: string}> = [];
-  document.querySelectorAll('.subexpression-row').forEach((row) => {
-    const texInput = row.querySelector('.subexpression-tex') as HTMLInputElement;
-    const colorInput = row.querySelector('.subexpression-color') as HTMLInputElement;
-    const occurrenceInput = row.querySelector('.subexpression-occurrence') as HTMLInputElement;
-    if (texInput && colorInput && occurrenceInput) {
-      styles.push({
-        tex: texInput.value.trim(),
-        color: colorInput.value.trim(),
-        occurrence: occurrenceInput.value.trim()
-      });
-    }
-  });
-
-  draftState = {
-    tex: (document.getElementById("input") as HTMLTextAreaElement).value.trim(),
-    display: (document.getElementById("display") as HTMLInputElement).checked,
-    bgcolor: (document.getElementById("bgcolor") as HTMLInputElement).value.trim(),
-    fontcolor: (document.getElementById("fontcolor") as HTMLInputElement).value.trim(),
-    fontsize: (document.getElementById("fontsize") as HTMLInputElement).value,
-    subExpressionStyles: styles
-  };
+  subExpressionUI?.syncFromUI();
+  draftState = collectRenderOptionsFromUI(subExpressionManager, currentTheme);
 }
 
 // Function to restore draft state
 function restoreDraftState() {
   if (draftState) {
-    (document.getElementById("input") as HTMLTextAreaElement).value = draftState.tex;
-    (document.getElementById("display") as HTMLInputElement).checked = draftState.display;
-    (document.getElementById("bgcolor") as HTMLInputElement).value = draftState.bgcolor;
-    (document.getElementById("fontcolor") as HTMLInputElement).value = draftState.fontcolor;
-    (document.getElementById("fontsize") as HTMLInputElement).value = draftState.fontsize;
-    
-    // Update color pickers
-    const bgcolorExpanded = expandColor(draftState.bgcolor);
-    const fontcolorExpanded = expandColor(draftState.fontcolor);
-    (document.getElementById('bgcolor-picker') as HTMLInputElement).value = '#' + bgcolorExpanded;
-    (document.getElementById('fontcolor-picker') as HTMLInputElement).value = '#' + fontcolorExpanded;
-    
-    // Restore sub-expression styles
-    if (draftState.subExpressionStyles) {
-      // Clear existing rows
-      (document.getElementById('subexpression-rows') as HTMLDivElement).innerHTML = '';
-      subExpressionStyles = [];
-      subExpressionRowCounter = 0;
-      
-      // Add rows for each style
-      draftState.subExpressionStyles.forEach(style => {
-        addSubExpressionRow(style);
-      });
-    }
-    
-    // Re-render
+    applyRenderOptionsToUI(draftState, subExpressionManager, currentTheme);
+    subExpressionUI?.syncToUI();
     convert();
-    
     draftState = null; // Clear after restoring
   }
 }
@@ -564,48 +340,27 @@ function prepareMessageData(updateExisting = false) {
     return null; // No SVG found
   }
   
-  const tex = (document.getElementById("input") as HTMLTextAreaElement).value.trim();
+  // Sync UI state to manager before collecting
+  subExpressionUI?.syncFromUI();
+  
+  // Collect render options using unified function
+  const options = collectRenderOptionsFromUI(subExpressionManager, currentTheme);
+  
   // Use outerHTML to get the complete SVG element (not just innerHTML)
   const svg = svgElement.outerHTML;
-  const display = (document.getElementById("display") as HTMLInputElement).checked;
-  const fontsizeInput = (document.getElementById('fontsize') as HTMLInputElement).value;
-  const fontsize = fontsizeInput ? parseFloat(fontsizeInput) : 16;
-  const bgcolorRaw = (document.getElementById("bgcolor") as HTMLInputElement).value.trim() || (THEME_DEFAULTS as any)[currentTheme].background;
-  const fontcolorRaw = (document.getElementById("fontcolor") as HTMLInputElement).value.trim() || (THEME_DEFAULTS as any)[currentTheme].font;
-  
-  // Normalize colors: expand and add # prefix (backend expects normalized 6-digit hex with #)
-  const bgcolor = '#' + expandColor(bgcolorRaw);
-  const fontcolor = '#' + expandColor(fontcolorRaw);
   
   // Calculate scale from font-size (default MathJax font-size is 12px per em)
-  const scale = fontsize / 16;
-  
-  // Collect sub-expression styles (normalize colors with # prefix)
-  const styles: Array<{tex: string, color: string, occurrence: string}> = [];
-  document.querySelectorAll('.subexpression-row').forEach((row) => {
-    const texInput = row.querySelector('.subexpression-tex') as HTMLInputElement;
-    const colorInput = row.querySelector('.subexpression-color') as HTMLInputElement;
-    const occurrenceInput = row.querySelector('.subexpression-occurrence') as HTMLInputElement;
-    if (texInput && colorInput && occurrenceInput) {
-      // Normalize color: expand and add # prefix
-      const normalizedColor = '#' + expandColor(colorInput.value.trim());
-      styles.push({
-        tex: texInput.value.trim(),
-        color: normalizedColor,
-        occurrence: occurrenceInput.value.trim()
-      });
-    }
-  });
+  const scale = options.fontSize / 16;
   
   return {
-    tex,
+    tex: options.tex,
     svg,
     scale,
-    display,
-    bgcolor,
-    fontcolor,
-    fontsize,
-    subExpressionStyles: styles,
+    display: options.display,
+    bgcolor: options.backgroundColor,
+    fontcolor: options.fontColor,
+    fontsize: options.fontSize,
+    subExpressionStyles: options.subExpressionStyles,
     updateExisting
   };
 }
@@ -729,20 +484,13 @@ function togglePreview() {
 
 // Make functions available globally for inline handlers
 (window as any).convert = convert;
-(window as any).addSubExpressionRow = addSubExpressionRow;
 (window as any).onColorTextChange = onColorTextChange;
-(window as any).saveConfig = saveConfig;
-(window as any).updateSubExpressionStyle = updateSubExpressionStyle;
-(window as any).onSubExpressionColorChange = onSubExpressionColorChange;
-(window as any).onSubExpressionColorTextInput = onSubExpressionColorTextInput;
-(window as any).onSubExpressionColorTextChange = onSubExpressionColorTextChange;
-(window as any).removeSubExpressionRow = removeSubExpressionRow;
+(window as any).saveUserPreferences = saveUserPreferences;
 (window as any).selectAllText = selectAllText;
 (window as any).togglePreview = togglePreview;
 
 // Initialize the plugin - handle both DOMContentLoaded and window.onload for compatibility
 function initializePlugin() {
-
   // Initialize to create mode (this will also expand the preview)
   switchToCreateMode();
   
@@ -760,6 +508,24 @@ function initializePlugin() {
   (document.getElementById('fontcolor') as HTMLInputElement).value = fontcolorExpanded;
   syncColorInputs('bgcolor');
   syncColorInputs('fontcolor');
+  
+  // Initialize sub-expression UI component
+  const subExpressionContainer = document.getElementById('subexpression-styling') as HTMLElement;
+  if (subExpressionContainer) {
+    const errorCallbacks: SubExpressionErrorCallbacks = {
+      showError: showSubExpressionError,
+      clearError: clearSubExpressionError,
+      clearAllErrors: clearSubExpressionErrors
+    };
+    subExpressionUI = new SubExpressionStylesUI(
+      subExpressionContainer,
+      subExpressionManager,
+      errorCallbacks,
+      convert, // onChange callback
+      () => currentTheme, // theme getter
+      updateSubExpressionStylesDirectly // direct styling update callback (for color picker)
+    );
+  }
   
   // Convert immediately - MathJax should be available since scripts are inlined
   convert();
@@ -799,39 +565,26 @@ window.addEventListener('message', (event: MessageEvent) => {
     convert(); // re-render with new colors
   }
   
-  // Handle config load
-  if (message.type === 'loadConfig' && message.config) {
-    const config = message.config;
-    if (config.display !== undefined) {
-      (document.getElementById('display') as HTMLInputElement).checked = config.display;
-    }
-    if (config.bgcolor) {
-      // Expand color (strip # prefix if present for backward compatibility)
-      const bgcolorValue = expandColor(config.bgcolor.replace(/^#/, ''));
-      (document.getElementById('bgcolor') as HTMLInputElement).value = bgcolorValue;
-      (document.getElementById('bgcolor-picker') as HTMLInputElement).value = '#' + bgcolorValue;
-    }
-    if (config.fontcolor) {
-      // Expand color (strip # prefix if present for backward compatibility)
-      const fontcolorValue = expandColor(config.fontcolor.replace(/^#/, ''));
-      (document.getElementById('fontcolor') as HTMLInputElement).value = fontcolorValue;
-      (document.getElementById('fontcolor-picker') as HTMLInputElement).value = '#' + fontcolorValue;
-    }
-    if (config.fontsize) {
-      (document.getElementById('fontsize') as HTMLInputElement).value = config.fontsize;
-    }
-    if (config.subExpressionStyles && Array.isArray(config.subExpressionStyles)) {
-      // Clear existing rows
-      (document.getElementById('subexpression-rows') as HTMLDivElement).innerHTML = '';
-      subExpressionStyles = [];
-      subExpressionRowCounter = 0;
-      
-      // Add rows for each style
-      config.subExpressionStyles.forEach((style: {tex: string, color: string, occurrence: string}) => {
-        addSubExpressionRow(style);
-      });
-    }
-    convert(); // Apply loaded config
+  // Handle user preferences load
+  if (message.type === 'loadUserPreferences' && message.userPreferences) {
+    const prefs = message.userPreferences;
+    // Convert old format if needed (migration from old config)
+    const renderOptions: RenderOptions = {
+      tex: prefs.tex || '',
+      display: prefs.display !== undefined ? prefs.display : true,
+      fontSize: prefs.fontsize || prefs.fontSize || 24,
+      backgroundColor: prefs.bgcolor || prefs.backgroundColor || '#000000',
+      fontColor: prefs.fontcolor || prefs.fontColor || '#E0E0E0',
+      subExpressionStyles: (prefs.subExpressionStyles || []).map((style: any) => ({
+        expression: style.expression || style.tex || '',
+        color: style.color || '#000000',
+        occurrences: style.occurrences !== undefined ? style.occurrences : style.occurrence
+      }))
+    };
+    
+    applyRenderOptionsToUI(renderOptions, subExpressionManager, currentTheme);
+    subExpressionUI?.syncToUI();
+    convert(); // Apply loaded preferences
   }
   
   // Handle node data load (when selecting a node with plugin data)
@@ -841,46 +594,23 @@ window.addEventListener('message', (event: MessageEvent) => {
     // Switch to edit mode
     switchToEditMode(nodeId);
     
-    // Load TeX source
-    if (texSource) {
-      (document.getElementById('input') as HTMLTextAreaElement).value = texSource;
-    }
-    
-    // Load render options
+    // Convert render options to new format if needed (migration from old format)
     if (renderOptions) {
-      if (renderOptions.display !== undefined) {
-        (document.getElementById('display') as HTMLInputElement).checked = renderOptions.display;
-      }
+      const options: RenderOptions = {
+        tex: texSource || '',
+        display: renderOptions.display !== undefined ? renderOptions.display : true,
+        fontSize: renderOptions.fontSize || 16,
+        backgroundColor: renderOptions.backgroundColor || '#000000',
+        fontColor: renderOptions.fontColor || '#E0E0E0',
+        subExpressionStyles: (renderOptions.subExpressionStyles || []).map((style: any) => ({
+          expression: style.expression || style.tex || '',
+          color: style.color || '#000000',
+          occurrences: style.occurrences !== undefined ? style.occurrences : style.occurrence
+        }))
+      };
       
-      if (renderOptions.fontSize) {
-        (document.getElementById('fontsize') as HTMLInputElement).value = renderOptions.fontSize;
-      }
-      
-      if (renderOptions.fontColor) {
-        // Remove # prefix if present, then expand
-        const fontcolorValue = expandColor(renderOptions.fontColor.replace(/^#/, ''));
-        (document.getElementById('fontcolor') as HTMLInputElement).value = fontcolorValue;
-        (document.getElementById('fontcolor-picker') as HTMLInputElement).value = '#' + fontcolorValue;
-      }
-      
-      if (renderOptions.backgroundColor) {
-        // Remove # prefix if present, then expand
-        const bgcolorValue = expandColor(renderOptions.backgroundColor.replace(/^#/, ''));
-        (document.getElementById('bgcolor') as HTMLInputElement).value = bgcolorValue;
-        (document.getElementById('bgcolor-picker') as HTMLInputElement).value = '#' + bgcolorValue;
-      }
-      
-      if (renderOptions.subExpressionStyles && Array.isArray(renderOptions.subExpressionStyles)) {
-        // Clear existing rows
-        (document.getElementById('subexpression-rows') as HTMLDivElement).innerHTML = '';
-        subExpressionStyles = [];
-        subExpressionRowCounter = 0;
-        
-        // Add rows for each style
-        renderOptions.subExpressionStyles.forEach((style: {tex: string, color: string, occurrence: string}) => {
-          addSubExpressionRow(style);
-        });
-      }
+      applyRenderOptionsToUI(options, subExpressionManager, currentTheme);
+      subExpressionUI?.syncToUI();
     }
     
     // Re-render with loaded data (but don't trigger update)
