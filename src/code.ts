@@ -9,10 +9,15 @@ class PluginBackend {
    * Initialize the plugin backend
    */
   initialize(): Promise<void> {
+    // Handle reset command if triggered from menu
+    if (figma.command === 'resetDefaults') {
+      return this.handleResetDefaults();
+    }
+
     // Always use the bundled HTML exposed via Figma's __html__ variable.
     // CSS is inlined in both dev and prod builds, so this works in both modes.
     figma.showUI(__html__, { themeColors: true });
-    figma.ui.resize(420, 540);
+    figma.ui.resize(420, 560);
 
     // Load saved user preferences on initialization
     this.loadAndSendUserPreferences();
@@ -103,17 +108,67 @@ class PluginBackend {
   }
 
   /**
+   * Handle reset to defaults command
+   */
+  private async handleResetDefaults(): Promise<void> {
+    try {
+      // Clear user preferences from storage
+      await figma.clientStorage.deleteAsync('userPreferences');
+      
+      // Show UI
+      figma.showUI(__html__, { themeColors: true });
+      figma.ui.resize(420, 560);
+      
+      // Send loadUserPreferences message with null (so frontend knows preferences were cleared)
+      // This allows the frontend initialization to proceed properly
+      figma.ui.postMessage({ 
+        type: 'loadUserPreferences', 
+        userPreferences: null 
+      });
+      
+      // Send reset message to UI (this will trigger the reset after initialization)
+      figma.ui.postMessage({ type: 'resetToDefaults' });
+      
+      // Send theme to UI
+      this.sendTheme();
+      
+      // Set up event listeners
+      this.setupEventListeners();
+      
+      // Check selection on initial load
+      this.checkSelectionAndLoadData();
+      
+      // Show notification
+      figma.notify('Plugin reset to default settings');
+    } catch (err) {
+      console.error('Error resetting plugin:', err);
+      figma.notify('Error resetting plugin', { error: true });
+    }
+    
+    return Promise.resolve();
+  }
+
+  /**
    * Load and send user preferences to UI
+   * Always sends a message, even if no preferences exist (so frontend knows to proceed)
    */
   private loadAndSendUserPreferences(): Promise<void> {
     return figma.clientStorage.getAsync('userPreferences')
       .then((userPreferences) => {
-        if (userPreferences) {
-          figma.ui.postMessage({ type: 'loadUserPreferences', userPreferences });
-        }
+        // Always send a message, even if preferences don't exist
+        // This allows the frontend to know preferences were checked and proceed with initialization
+        figma.ui.postMessage({ 
+          type: 'loadUserPreferences', 
+          userPreferences: userPreferences || null 
+        });
       })
       .catch((err) => {
         console.error('Error loading user preferences:', err);
+        // Still send message on error so frontend can proceed
+        figma.ui.postMessage({ 
+          type: 'loadUserPreferences', 
+          userPreferences: null 
+        });
       });
   }
 

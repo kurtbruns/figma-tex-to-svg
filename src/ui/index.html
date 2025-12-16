@@ -1,28 +1,20 @@
 <!DOCTYPE html>
 <html lang="en">
   <head>
-    <meta charset="utf-8" />
+    <meta charset="utf-8">
     <title>TeX to SVG</title>
   </head>
   <body>
     <main>
       <h1>Math: TeX to SVG</h1>
       <div class="container">
-        <textarea id="input">x=\frac{-b \pm \sqrt{b^2-4 a c}}{2 a}</textarea>
-        <div id="preview-container">
-          <div id="preview-header" onclick="togglePreview()">
-            <span id="preview-toggle">></span>
-            <label>Preview</label>
-          </div>
-          <div id="preview-output" class="collapsed">
-            <div id="output"></div>
-          </div>
-        </div>
+        <textarea id="input" placeholder="Enter your TeX expression here"></textarea>
+
         <div id="settings-panel">
           <div class="settings-grid">
             <div>
               <label for="display">Display style</label>
-              <input type="checkbox" id="display" checked="true" onchange="convert();">
+              <input type="checkbox" id="display" checked onchange="convert();">
             </div>
             <div>
               <label for="background-color">Background</label>
@@ -35,7 +27,7 @@
                 onchange="onColorTextChange('background-color')"
                 onfocus="selectAllText(event)"
                 onmousedown="selectAllText(event)"
-              />
+              >
             </div>
             <div>
               <label for="font-size">Font size</label>
@@ -49,7 +41,7 @@
                 onchange="saveConfig(); convert();"
                 onfocus="selectAllText(event)"
                 onmousedown="selectAllText(event)"
-              />
+              >
             </div>
             <div>
               <label for="font-color">Font color</label>
@@ -62,27 +54,85 @@
                 onchange="onColorTextChange('font-color')"
                 onfocus="selectAllText(event)"
                 onmousedown="selectAllText(event)"
-              />
+              >
             </div>
           </div>
           <div id="subexpression-styling">
             <div id="subexpression-rows"></div>
-            <button id="add-subexpression-btn">Add sub-expression style</button>
+            <button type="button" id="add-subexpression-btn">Add sub-expression style</button>
           </div>
         </div>
-        <div id="edit-mode-indicator" class="">
+        <div id="preview-container">
+          <div id="preview-header" onclick="togglePreview()">
+            <span id="preview-toggle">&gt;</span>
+            <span id="preview-text">Preview</span>
+          </div>
+          <div id="preview-output" class="collapsed">
+            <div id="output"></div>
+          </div>
+        </div>
+        <div id="edit-mode-indicator">
           <div class="node-info">
             <span>Editing math expression</span>
           </div>
-          <button class="locate-button" id="locate-button">
+          <button type="button" class="locate-button" id="locate-button">
             Locate in Figma
           </button>
         </div>
       </div>
-      <button id="place">Embed</button>
+
+      <button type="button" id="place">Embed</button>
 
     </main>
 
+    <!-- Configure MathJax and handle localStorage (not available in Figma plugins) -->
+    <script>
+      // Provide a no-op localStorage implementation for environments where it's unavailable
+      // Figma plugins run in a sandboxed environment where localStorage may not be accessible
+      (function() {
+        // Check if localStorage is accessible
+        let localStorageAvailable = false;
+        try {
+          // Try to access the property itself (this might throw in some environments)
+          const testAccess = window.localStorage;
+          if (testAccess) {
+            // Try to use it
+            const test = '__localStorage_test__';
+            testAccess.setItem(test, test);
+            testAccess.removeItem(test);
+            localStorageAvailable = true;
+          }
+        } catch (e) {
+          // localStorage is not available or throws when accessed
+          localStorageAvailable = false;
+        }
+        
+        // If localStorage is not available, provide a no-op implementation
+        if (!localStorageAvailable) {
+          const noopStorage = {
+            getItem: function() { return null; },
+            setItem: function() {},
+            removeItem: function() {},
+            clear: function() {},
+            length: 0,
+            key: function() { return null; }
+          };
+          
+          try {
+            // Override window.localStorage with no-op implementation
+            Object.defineProperty(window, 'localStorage', {
+              value: noopStorage,
+              writable: false,
+              configurable: false
+            });
+          } catch (e) {
+            // If override fails, MathJax will handle the error gracefully
+            // The no-op implementation prevents errors when MathJax tries to use localStorage
+          }
+        }
+      })();
+
+    </script>
     <!-- MathJax from CDN - load synchronously to ensure it's available before our script -->
     <script
       id="MathJax-script"

@@ -16,7 +16,7 @@ export const THEME_DEFAULTS: Record<string, { background: string; font: string }
   },
   light: {
     background: 'FFFFFF',
-    font: '222222',
+    font: '333333',
   },
 };
 

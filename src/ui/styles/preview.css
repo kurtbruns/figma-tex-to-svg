@@ -6,7 +6,7 @@
 
 #preview-header {
   padding: 0.5rem 0.75rem;
-  cursor: pointer;
+  cursor: default;
   display: flex;
   align-items: center;
   gap: 0.5rem;

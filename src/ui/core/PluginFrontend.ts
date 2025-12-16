@@ -12,11 +12,17 @@ class PluginFrontend {
   private stateStore!: StateStore; // Initialized in initialize()
   private subExpression: SubExpressionStyles | null = null;
   private updateTimer: ReturnType<typeof setTimeout> | null = null;
+  private previewInitialized: boolean = false;
+  private preferencesLoadedResolver: ((value: void | PromiseLike<void>) => void) | null = null;
+  private isInitializing: boolean = false;
+  private pendingReset: boolean = false;
 
   /**
    * Initialize the plugin frontend
    */
   initialize(): Promise<void> {
+    this.isInitializing = true;
+    
     // 1. Initialize state store
     this.stateStore = new StateStore();
     
@@ -37,8 +43,18 @@ class PluginFrontend {
     
     // 7. Load preferences and initial render
     return this.loadUserPreferencesFromBackend()
-      .then(() => this.convert())
+      .then(() => {
+        this.isInitializing = false;
+        // Check if reset was requested during initialization
+        if (this.pendingReset) {
+          this.pendingReset = false;
+          this.resetToDefaults();
+        } else {
+          this.convert();
+        }
+      })
       .catch((err) => {
+        this.isInitializing = false;
         console.error('Error initializing plugin:', err);
         throw err;
       });
@@ -90,6 +106,7 @@ class PluginFrontend {
    * Initialize components
    */
   private initializeComponents(): void {
+    // Initialize sub-expression styling component
     const subExpressionContainer = document.getElementById('subexpression-styling') as HTMLElement;
     if (subExpressionContainer) {
       const errorCallbacks: SubExpressionErrorCallbacks = {
@@ -106,6 +123,17 @@ class PluginFrontend {
         () => this.stateStore.getState().theme,
         () => this.updateSubExpressionStylesDirectly()
       );
+    }
+
+    // Initialize preview component - expand on first load (HTML starts with it collapsed)
+    if (!this.previewInitialized) {
+      const previewContainer = document.getElementById('preview-container') as HTMLDivElement;
+      const previewOutput = document.getElementById('preview-output') as HTMLDivElement;
+      if (previewContainer && previewOutput) {
+        previewContainer.classList.add('expanded');
+        previewOutput.classList.remove('collapsed');
+        this.previewInitialized = true;
+      }
     }
   }
 
@@ -274,13 +302,11 @@ class PluginFrontend {
     // Subscribe to changes for preference saving (debounced)
     let saveTimer: ReturnType<typeof setTimeout> | null = null;
     this.stateStore.subscribe((state) => {
-      // Only save if we have actual content
-      if (state.renderOptions.tex || state.renderOptions.subExpressionStyles.length > 0) {
-        if (saveTimer) clearTimeout(saveTimer);
-        saveTimer = setTimeout(() => {
-          this.saveUserPreferences();
-        }, 500);
-      }
+      // Always save preferences, including empty states
+      if (saveTimer) clearTimeout(saveTimer);
+      saveTimer = setTimeout(() => {
+        this.saveUserPreferences();
+      }, 500);
     });
   }
 
@@ -329,18 +355,8 @@ class PluginFrontend {
       fontcolorPicker.value = state.renderOptions.fontColor;
     }
 
-    // Update preview visibility based on mode
-    const previewContainer = document.getElementById('preview-container') as HTMLDivElement;
-    const previewOutput = document.getElementById('preview-output') as HTMLDivElement;
-    if (previewContainer && previewOutput) {
-      if (state.mode === 'create') {
-        previewContainer.classList.add('expanded');
-        previewOutput.classList.remove('collapsed');
-      } else {
-        previewContainer.classList.remove('expanded');
-        previewOutput.classList.add('collapsed');
-      }
-    }
+    // Don't change preview visibility automatically - respect user's choice
+    // Preview state is only set once during initialization, then controlled by user toggle
 
     // Update edit mode indicator
     const indicator = document.getElementById('edit-mode-indicator') as HTMLDivElement;
@@ -365,11 +381,26 @@ class PluginFrontend {
 
   /**
    * Load user preferences from backend
+   * Waits for preferences message from backend, with timeout fallback
    */
   private loadUserPreferencesFromBackend(): Promise<void> {
-    // This will be handled by message listener
-    // Return resolved promise for now
-    return Promise.resolve();
+    return new Promise<void>((resolve) => {
+      // Store resolver so message listener can call it
+      this.preferencesLoadedResolver = resolve;
+      
+      // Set up a timeout fallback (1000ms) in case preferences message never arrives
+      // This ensures the plugin still initializes even if backend has issues
+      // (Backend should always send a message, but this is a safety net)
+      setTimeout(() => {
+        if (this.preferencesLoadedResolver === resolve) {
+          // Preferences message didn't arrive, assume no preferences exist
+          // Inject default example for first-time users
+          this.injectDefaultExampleIfEmpty();
+          this.preferencesLoadedResolver = null;
+          resolve();
+        }
+      }, 1000);
+    });
   }
 
   /**
@@ -384,9 +415,33 @@ class PluginFrontend {
         this.applyTheme(message.theme);
       }
       
+      // Handle reset to defaults (check this first to set flag before loadUserPreferences)
+      if (message.type === 'resetToDefaults') {
+        this.pendingReset = true;
+        // If still initializing, reset will happen after initialization completes
+        // Otherwise, reset immediately
+        if (!this.isInitializing) {
+          this.resetToDefaults();
+        }
+      }
+      
       // Handle user preferences load
-      if (message.type === 'loadUserPreferences' && message.userPreferences) {
-        this.loadUserPreferences(message.userPreferences);
+      if (message.type === 'loadUserPreferences') {
+        if (message.userPreferences) {
+          // Preferences exist, load them
+          this.loadUserPreferences(message.userPreferences);
+        } else {
+          // No preferences exist - only inject default example if not resetting
+          // (when resetting, we want empty state, not the example)
+          if (!this.pendingReset) {
+            this.injectDefaultExampleIfEmpty();
+          }
+        }
+        // Resolve the promise that's waiting for preferences
+        if (this.preferencesLoadedResolver) {
+          this.preferencesLoadedResolver();
+          this.preferencesLoadedResolver = null;
+        }
       }
       
       // Handle node data load
@@ -421,8 +476,11 @@ class PluginFrontend {
    * Switch to edit mode
    */
   private switchToEditMode(nodeId: string): void {
-    // Save draft state before switching
-    this.saveDraftState();
+    // Save draft state before switching (only if currently in create mode)
+    const state = this.stateStore.getState();
+    if (state.mode === 'create') {
+      this.saveDraftState();
+    }
     
     this.stateStore.updateState({
       mode: 'edit',
@@ -435,8 +493,12 @@ class PluginFrontend {
    */
   private saveDraftState(): void {
     const state = this.stateStore.getState();
+    // Deep copy renderOptions including subExpressionStyles array
     this.stateStore.updateState({
-      draftState: { ...state.renderOptions }
+      draftState: {
+        ...state.renderOptions,
+        subExpressionStyles: state.renderOptions.subExpressionStyles.map(s => ({ ...s }))
+      }
     });
   }
 
@@ -446,12 +508,56 @@ class PluginFrontend {
   private restoreDraftState(): void {
     const state = this.stateStore.getState();
     if (state.draftState) {
+      // Deep copy draftState including subExpressionStyles array
       this.stateStore.updateState({
-        renderOptions: { ...state.draftState },
+        renderOptions: {
+          ...state.draftState,
+          subExpressionStyles: state.draftState.subExpressionStyles.map(s => ({ ...s }))
+        },
         draftState: null
       });
       this.convert();
     }
+  }
+
+  /**
+   * Reset plugin to default state (as if on first install)
+   */
+  private resetToDefaults(): void {
+    const state = this.stateStore.getState();
+    const theme = state.theme || this.detectOSTheme();
+    const defaults = THEME_DEFAULTS[theme] || THEME_DEFAULTS.dark;
+    
+    // Reset state to defaults
+    const defaultRenderOptions: RenderOptions = {
+      tex: '',
+      display: true,
+      fontSize: 24,
+      backgroundColor: '#' + defaults.background,
+      fontColor: '#' + defaults.font,
+      subExpressionStyles: []
+    };
+    
+    // Update state store with defaults
+    this.stateStore.updateState({
+      renderOptions: defaultRenderOptions,
+      mode: 'create',
+      currentNodeId: null,
+      lastRenderedTex: null,
+      lastRenderedDisplay: null,
+      currentSVGWrapper: null,
+      isLoadingNodeData: false,
+      draftState: null
+    });
+    
+    // Clear any sub-expression errors
+    this.clearSubExpressionErrors();
+    
+    // Clear pending reset flag
+    this.pendingReset = false;
+    
+    // Re-render with defaults
+    this.convert();
   }
 
   /**
@@ -471,6 +577,7 @@ class PluginFrontend {
 
   /**
    * Load user preferences
+   * Note: Does not call convert() - let the initialization flow handle rendering
    */
   private loadUserPreferences(prefs: any): void {
     const renderOptions: RenderOptions = {
@@ -487,7 +594,26 @@ class PluginFrontend {
     };
     
     this.stateStore.updateState({ renderOptions });
-    this.convert();
+    // Don't call convert() here - initialization flow will handle rendering
+  }
+
+  /**
+   * Inject default example TeX if input is empty (for first-time users)
+   */
+  private injectDefaultExampleIfEmpty(): void {
+    const state = this.stateStore.getState();
+    const texInput = document.getElementById('input') as HTMLTextAreaElement;
+    
+    // Only inject if both state and DOM input are empty
+    if (!state.renderOptions.tex.trim() && texInput && !texInput.value.trim()) {
+      const defaultExample = 'x=\\frac{-b \\pm \\sqrt{b^2-4 a c}}{2 a}';
+      this.stateStore.updateState({
+        renderOptions: {
+          ...state.renderOptions,
+          tex: defaultExample
+        }
+      });
+    }
   }
 
   /**
@@ -538,16 +664,29 @@ class PluginFrontend {
     const state = this.stateStore.getState();
     const options = state.renderOptions;
     
-    // Disable the display button until MathJax is done
-    const display = document.getElementById("display") as HTMLInputElement;
-    if (display) display.disabled = true;
-    
     // Clear the old output
     const output = document.getElementById('output') as HTMLDivElement;
     if (!output) return Promise.resolve();
     
     output.innerHTML = '';
     output.style.background = options.backgroundColor;
+    
+    // Check if TeX input is empty
+    const trimmedTex = options.tex.trim();
+    if (!trimmedTex) {
+      // Display helpful message for empty input
+      const messageElement = document.createElement('div');
+      messageElement.style.cssText = 'padding: 1rem; text-align: center; color: var(--figma-color-text-secondary, #999); font-style: italic;';
+      messageElement.textContent = 'Enter a TeX expression above';
+      output.appendChild(messageElement);
+      
+      this.stateStore.updateState({ 
+        currentSVGWrapper: null,
+        lastRenderedTex: null,
+        lastRenderedDisplay: null
+      });
+      return Promise.resolve();
+    }
     
     this.stateStore.updateState({ currentSVGWrapper: null });
     
@@ -593,9 +732,6 @@ class PluginFrontend {
           lastRenderedTex: null,
           lastRenderedDisplay: null
         });
-      })
-      .finally(() => {
-        if (display) display.disabled = false;
       });
   }
 
@@ -765,6 +901,12 @@ class PluginFrontend {
   private loadNodeData(message: any): Promise<void> {
     this.stateStore.updateState({ isLoadingNodeData: true });
     
+    // Save draft state BEFORE updating renderOptions (only if in create mode)
+    const currentState = this.stateStore.getState();
+    if (currentState.mode === 'create') {
+      this.saveDraftState();
+    }
+    
     // Apply options to state store
     const options: RenderOptions = {
       tex: message.texSource || '',
@@ -779,8 +921,13 @@ class PluginFrontend {
       }))
     };
     
-    this.stateStore.updateState({ renderOptions: options });
-    this.switchToEditMode(message.nodeId);
+    // Update renderOptions and switch to edit mode in one call
+    // (Don't use switchToEditMode here since we already saved draft state above)
+    this.stateStore.updateState({ 
+      renderOptions: options,
+      mode: 'edit',
+      currentNodeId: message.nodeId
+    });
     
     // Trigger render with promise chain
     return this.renderMath()
