@@ -8,7 +8,7 @@
     "dev": "concurrently \"npm run watch\" \"http-server dist -p 5173 -o\"",
     "watch": "NODE_ENV=development webpack --config webpack.config.js --mode=development --watch",
     "sync-version": "node sync-version.js",
-    "postversion": "npm run sync-version"
+    "version": "npm run sync-version"
   },
   "author": "kurtbruns",
   "license": "MIT",
