@@ -10,8 +10,8 @@ Render math expressions in Figma using TeX syntax. Enter TeX, customize appearan
 
 For example, to render the fundamental theorem of calculus, enter the following TeX into the text area and click the "embed" button. This will render the math as an SVG and insert it in the design.
 
-Source code: https://github.com/kurtbruns/figma-tex-to-svg
-Created by: [Kurt Bruns](https://kurtbruns.com)
+Source code: https://github.com/kurtbruns/figma-mathtex-editor
+Created by: Kurt Bruns
 
 ## Category
 
@@ -19,4 +19,4 @@ Education > Other
 
 ## Tags
 
-math, tex, svg, latex, equation, formula
+math, tex, svg, latex, equation

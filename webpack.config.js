@@ -56,7 +56,6 @@ module.exports = (env, argv) => {
             // Extract CSS to a file for inlining (works in both dev and prod)
             MiniCssExtractPlugin.loader,
             'css-loader',
-            'sass-loader',
           ],
         },
       ],
