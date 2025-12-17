@@ -41,7 +41,7 @@ Before publishing, follow these steps:
    npm version major   # increments version (5 → 6, 6 → 7, etc.)
    ```
 
-   This will update `package.json` and create a git commit with the version change.
+   This will update `package.json` and create a git commit with the version change. If needed, you can also use `npm version patch` or `npm version minor` to increment the version number for bug fixes before publishing the new version to Figma.
 
 3. **Push changes to the repository**: Push your commits and tags to the remote repository.
    ```bash
@@ -66,9 +66,5 @@ After committing changes, updating the version, and building, publish to Figma:
 2. **Open your plugin** in development mode
 3. **Go to** `Plugins` → `Development` → `Mange Plugins in Development`
 4. **Select** `Publish new version`
-5. **Fill in** the version details:
-   - Version number (should match the major version number in `package.json`, e.g., if `package.json` shows `6.0.0`, use `6` in Figma)
-   - Release notes describing the changes
+5. **Fill in** any updated details.
 6. **Click** `Publish`
-
-The new version will be available to users after Figma reviews and approves it (if required for your plugin).
