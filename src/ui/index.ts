@@ -6,8 +6,15 @@ import { PluginFrontend } from './core';
 
 // Initialize the plugin frontend
 // Try multiple initialization strategies for maximum compatibility
+let pluginFrontend: PluginFrontend;
 function initializePlugin() {
-  new PluginFrontend().initialize().catch(console.error);
+  pluginFrontend = new PluginFrontend();
+  pluginFrontend.initialize()
+    .then(() => {
+      // Uncomment the line below to reset plugin to defaults (as if loading for the first time)
+      // pluginFrontend.resetToDefaults();
+    })
+    .catch(console.error);
 }
 
 if (document.readyState === 'loading') {

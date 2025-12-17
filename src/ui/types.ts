@@ -37,6 +37,7 @@ export interface RenderOptions {
  * Same structure as RenderOptions but represents user defaults
  */
 export interface UserPreferences extends RenderOptions {
-  // Could add user-specific preferences here in the future (e.g., theme preferences)
+  // Draft state from create mode (stored separately to distinguish from stale node data)
+  draftState?: RenderOptions | null;
 }
 

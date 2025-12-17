@@ -3,6 +3,7 @@
  */
 
 import { RenderOptions } from '../types';
+import { DEFAULT_RENDER_OPTIONS } from '../utils';
 
 /**
  * Application state interface
@@ -30,10 +31,7 @@ export class StateStore {
     this.state = {
       renderOptions: {
         tex: '',
-        display: true,
-        fontSize: 24,
-        backgroundColor: '#000000',
-        fontColor: '#E0E0E0',
+        ...DEFAULT_RENDER_OPTIONS,
         subExpressionStyles: []
       },
       theme: 'dark',

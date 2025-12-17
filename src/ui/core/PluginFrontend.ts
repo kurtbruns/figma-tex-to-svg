@@ -3,20 +3,19 @@
  */
 
 import { StateStore, AppState } from './StateStore';
-import { typesetMath, TypesettingOptions, SubExpressionErrorCallbacks, setSVGColor, applySubExpressionColors } from '../mathRenderer';
+import { typesetMath, TypesettingOptions, SubExpressionErrorCallbacks, setSVGColor, applySubExpressionColors, styleErrorNodes } from '../mathRenderer';
 import { SubExpressionStyles } from '../components/SubExpressionStyles';
 import { RenderOptions, UserPreferences, SubExpressionStyle } from '../types';
-import { expandColor, THEME_DEFAULTS } from '../utils';
+import { expandColor, THEME_DEFAULTS, MATHJAX_DEFAULT_FONT_SIZE, DEFAULT_RENDER_OPTIONS } from '../utils';
 
 class PluginFrontend {
   private stateStore!: StateStore; // Initialized in initialize()
   private subExpression: SubExpressionStyles | null = null;
   private updateTimer: ReturnType<typeof setTimeout> | null = null;
   private previewInitialized: boolean = false;
-  private preferencesLoadedResolver: ((value: void | PromiseLike<void>) => void) | null = null;
+  private initializationResolver: ((value: void | PromiseLike<void>) => void) | null = null;
   private isInitializing: boolean = false;
   private pendingReset: boolean = false;
-  private justEmbedded: boolean = false;
 
   /**
    * Initialize the plugin frontend
@@ -42,8 +41,8 @@ class PluginFrontend {
     // 6. Set up state subscriptions
     this.setupSubscriptions();
     
-    // 7. Load preferences and initial render
-    return this.loadUserPreferencesFromBackend()
+    // 7. Wait for initialization data and initial render
+    return this.waitForInitializationData()
       .then(() => {
         this.isInitializing = false;
         // Check if reset was requested during initialization
@@ -82,8 +81,8 @@ class PluginFrontend {
 
     const renderOptions: RenderOptions = {
       tex: texInput?.value.trim() || '',
-      display: displayInput?.checked ?? true,
-      fontSize: fontSizeInput ? parseFloat(fontSizeInput.value) : 24,
+      display: displayInput?.checked ?? DEFAULT_RENDER_OPTIONS.display,
+      fontSize: fontSizeInput ? parseFloat(fontSizeInput.value) : DEFAULT_RENDER_OPTIONS.fontSize,
       backgroundColor: '#' + expandColor(bgcolorRaw),
       fontColor: '#' + expandColor(fontcolorRaw),
       subExpressionStyles: []
@@ -204,8 +203,15 @@ class PluginFrontend {
           return;
         }
         // Clear draft state since we're embedding it (it's no longer a draft)
-        this.stateStore.updateState({ draftState: null });
-        this.justEmbedded = true;
+        // Set mode to 'edit' immediately - the node will be created and selected by the backend
+        // This ensures that when loadNodeData() is called, mode is already 'edit' and we don't save draftState
+        this.stateStore.updateState({ 
+          draftState: null,
+          mode: 'edit',
+          currentNodeId: null // Will be set when the node is created and selected
+        });
+        // Clear draftState from preferences since we're committing it (embedding)
+        this.clearDraftStateFromPreferences();
         (window.parent as Window).postMessage({ pluginMessage: data }, '*');
       };
     }
@@ -304,13 +310,19 @@ class PluginFrontend {
     });
 
     // Subscribe to changes for preference saving (debounced)
+    // Only save preferences when in create mode - preferences are defaults for new nodes,
+    // not data from editing existing nodes
     let saveTimer: ReturnType<typeof setTimeout> | null = null;
     this.stateStore.subscribe((state) => {
-      // Always save preferences, including empty states
-      if (saveTimer) clearTimeout(saveTimer);
-      saveTimer = setTimeout(() => {
-        this.saveUserPreferences();
-      }, 500);
+      // Only save preferences when in create mode
+      // This prevents node data from being saved as preferences when editing
+      if (state.mode === 'create') {
+        // Always save preferences, including empty states
+        if (saveTimer) clearTimeout(saveTimer);
+        saveTimer = setTimeout(() => {
+          this.saveUserPreferences();
+        }, 500);
+      }
     });
   }
 
@@ -387,23 +399,21 @@ class PluginFrontend {
   }
 
   /**
-   * Load user preferences from backend
-   * Waits for preferences message from backend, with timeout fallback
+   * Wait for initialization data from backend
+   * Waits for the combined initialize message containing preferences, selection, and theme
    */
-  private loadUserPreferencesFromBackend(): Promise<void> {
+  private waitForInitializationData(): Promise<void> {
     return new Promise<void>((resolve) => {
       // Store resolver so message listener can call it
-      this.preferencesLoadedResolver = resolve;
+      this.initializationResolver = resolve;
       
-      // Set up a timeout fallback (1000ms) in case preferences message never arrives
+      // Set up a timeout fallback (1000ms) in case initialization message never arrives
       // This ensures the plugin still initializes even if backend has issues
-      // (Backend should always send a message, but this is a safety net)
       setTimeout(() => {
-        if (this.preferencesLoadedResolver === resolve) {
-          // Preferences message didn't arrive, assume no preferences exist
-          // Inject default example for first-time users
-          this.injectDefaultExampleIfEmpty();
-          this.preferencesLoadedResolver = null;
+        if (this.initializationResolver === resolve) {
+          // Initialization message didn't arrive, use defaults
+          console.warn('Initialization message timeout - using defaults');
+          this.initializationResolver = null;
           resolve();
         }
       }, 1000);
@@ -417,12 +427,18 @@ class PluginFrontend {
     window.addEventListener('message', (event: MessageEvent) => {
       const message = (event.data as any).pluginMessage || {};
       
-      // Handle theme change
+      // Handle initialization message (contains preferences, selection, and theme)
+      if (message.type === 'initialize') {
+        this.handleInitializationMessage(message);
+        return;
+      }
+      
+      // Handle theme change (runtime theme changes)
       if (message.theme === 'dark' || message.theme === 'light') {
         this.applyTheme(message.theme);
       }
       
-      // Handle reset to defaults (check this first to set flag before loadUserPreferences)
+      // Handle reset to defaults
       if (message.type === 'resetToDefaults') {
         this.pendingReset = true;
         // If still initializing, reset will happen after initialization completes
@@ -432,35 +448,107 @@ class PluginFrontend {
         }
       }
       
-      // Handle user preferences load
-      if (message.type === 'loadUserPreferences') {
-        if (message.userPreferences) {
-          // Preferences exist, load them
-          this.loadUserPreferences(message.userPreferences);
-        } else {
-          // No preferences exist - only inject default example if not resetting
-          // (when resetting, we want empty state, not the example)
-          if (!this.pendingReset) {
-            this.injectDefaultExampleIfEmpty();
-          }
-        }
-        // Resolve the promise that's waiting for preferences
-        if (this.preferencesLoadedResolver) {
-          this.preferencesLoadedResolver();
-          this.preferencesLoadedResolver = null;
-        }
-      }
-      
-      // Handle node data load
+      // Handle node data load (runtime selection changes)
       if (message.type === 'loadNodeData') {
         this.loadNodeData(message);
       }
       
-      // Handle clearing node data
+      // Handle clearing node data (runtime selection changes)
       if (message.type === 'clearNodeData') {
         this.switchToCreateMode();
       }
     });
+  }
+
+  /**
+   * Handle initialization message from backend
+   * Processes combined message containing preferences, selection state, and theme
+   */
+  private handleInitializationMessage(message: any): void {
+    // Apply theme first
+    if (message.theme === 'dark' || message.theme === 'light') {
+      this.applyTheme(message.theme);
+    }
+
+    // Handle selection state
+    if (message.selection?.hasNode && message.selection.nodeData) {
+      // Node is selected - load node data
+      this.stateStore.updateState({ isLoadingNodeData: true });
+      
+      // Save draft state if in create mode (before switching to edit mode)
+      // If mode is already 'edit' (e.g., from embedding), don't save draftState
+      const currentState = this.stateStore.getState();
+      if (currentState.mode === 'create') {
+        this.saveDraftState();
+      }
+
+      // Load node data
+      const options: RenderOptions = {
+        tex: message.selection.nodeData.texSource || '',
+        display: message.selection.nodeData.renderOptions?.display !== undefined 
+          ? message.selection.nodeData.renderOptions.display 
+          : DEFAULT_RENDER_OPTIONS.display,
+        fontSize: message.selection.nodeData.renderOptions?.fontSize || DEFAULT_RENDER_OPTIONS.fontSize,
+        backgroundColor: message.selection.nodeData.renderOptions?.backgroundColor || DEFAULT_RENDER_OPTIONS.backgroundColor,
+        fontColor: message.selection.nodeData.renderOptions?.fontColor || DEFAULT_RENDER_OPTIONS.fontColor,
+        subExpressionStyles: (message.selection.nodeData.renderOptions?.subExpressionStyles || []).map((style: any) => ({
+          expression: style.expression || '',
+          color: style.color || '#000000',
+          occurrences: style.occurrences
+        }))
+      };
+
+      this.stateStore.updateState({
+        renderOptions: options,
+        mode: 'edit',
+        currentNodeId: message.selection.nodeData.nodeId,
+        isLoadingNodeData: false
+      });
+    } else {
+      // No node selected - load preferences if available
+      if (message.userPreferences) {
+        // Restore draftState from preferences if it exists (represents create mode work)
+        // If draftState doesn't exist, clear tex/subExpressionStyles to avoid loading stale node data
+        if (message.userPreferences.draftState) {
+          // Restore preferences.draftState to BOTH renderOptions (for display) AND state.draftState (for within-session switching)
+          const cleanedPreferences = {
+            ...message.userPreferences,
+            tex: message.userPreferences.draftState.tex,
+            subExpressionStyles: message.userPreferences.draftState.subExpressionStyles.map((s: SubExpressionStyle) => ({ ...s }))
+          };
+          this.loadUserPreferences(cleanedPreferences);
+          
+          // Also restore to state.draftState for within-session switching
+          // This allows the draft to be preserved if user switches create → edit → create
+          // Use the full RenderOptions structure (merge draftState with other renderOptions from preferences)
+          const currentState = this.stateStore.getState();
+          this.stateStore.updateState({
+            draftState: {
+              ...currentState.renderOptions,
+              tex: message.userPreferences.draftState.tex,
+              subExpressionStyles: message.userPreferences.draftState.subExpressionStyles.map((s: SubExpressionStyle) => ({ ...s }))
+            }
+          });
+        } else {
+          // No draftState in preferences - clear tex/subExpressionStyles to avoid loading stale node data
+          const cleanedPreferences = {
+            ...message.userPreferences,
+            tex: '', // Clear tex to avoid loading old node data
+            subExpressionStyles: [] // Clear subExpressionStyles to avoid loading old node data
+          };
+          this.loadUserPreferences(cleanedPreferences);
+        }
+      } else if (!this.pendingReset) {
+        // No preferences exist - inject default example for first-time users
+        this.injectDefaultExampleIfEmpty();
+      }
+    }
+
+    // Resolve initialization promise
+    if (this.initializationResolver) {
+      this.initializationResolver();
+      this.initializationResolver = null;
+    }
   }
 
   // ========== Workflow Methods ==========
@@ -514,10 +602,17 @@ class PluginFrontend {
       mode: 'edit',
       currentNodeId: nodeId
     });
+    
+    // Clear draftState from preferences when switching to edit mode
+    // This prevents stale draftState from being restored later
+    this.clearDraftStateFromPreferences();
   }
 
   /**
-   * Save draft state
+   * Save draft state to state.draftState (in-memory only, for within-session switching)
+   * 
+   * state.draftState: Within-session switching only - preserves draft when switching create → edit → create.
+   * This is separate from preferences.draftState which handles cross-session persistence.
    */
   private saveDraftState(): void {
     const state = this.stateStore.getState();
@@ -551,7 +646,7 @@ class PluginFrontend {
   /**
    * Reset plugin to default state (as if on first install)
    */
-  private resetToDefaults(): void {
+  resetToDefaults(): void {
     const state = this.stateStore.getState();
     const theme = state.theme || this.detectOSTheme();
     const defaults = THEME_DEFAULTS[theme] || THEME_DEFAULTS.dark;
@@ -559,8 +654,8 @@ class PluginFrontend {
     // Reset state to defaults
     const defaultRenderOptions: RenderOptions = {
       tex: '',
-      display: true,
-      fontSize: 24,
+      display: DEFAULT_RENDER_OPTIONS.display,
+      fontSize: DEFAULT_RENDER_OPTIONS.fontSize,
       backgroundColor: '#' + defaults.background,
       fontColor: '#' + defaults.font,
       subExpressionStyles: []
@@ -584,21 +679,63 @@ class PluginFrontend {
     // Clear pending reset flag
     this.pendingReset = false;
     
+    // Inject default example to simulate first-time user experience
+    this.injectDefaultExampleIfEmpty();
+    
     // Re-render with defaults
     this.convert();
   }
 
   /**
    * Save user preferences
+   * 
+   * preferences.draftState: Cross-session persistence - always reflects current create mode work.
+   * This is saved from renderOptions directly, not from state.draftState, to ensure draft work
+   * persists even if the user never switches modes.
    */
   private saveUserPreferences(): void {
+    const state = this.stateStore.getState();
+    const options = state.renderOptions;
+    
+    const preferences: any = {
+      ...options
+    };
+    
+    // Save current create mode work as draftState for cross-session persistence
+    // Always save renderOptions directly (not state.draftState) when in create mode
+    // This ensures draftState persists even if user never switches modes
+    if (state.mode === 'create') {
+      preferences.draftState = {
+        tex: options.tex,
+        subExpressionStyles: options.subExpressionStyles.map((s: SubExpressionStyle) => ({ ...s }))
+      };
+    } else {
+      // Explicitly set to null when not in create mode
+      preferences.draftState = null;
+    }
+    
+    (window.parent as Window).postMessage({ 
+      pluginMessage: { 
+        type: 'saveUserPreferences',
+        ...preferences
+      } 
+    }, '*');
+  }
+
+  /**
+   * Clear draftState from preferences (preferences.draftState, not state.draftState)
+   * Called when embedding or switching to edit mode to prevent stale draftState from being restored
+   * on next plugin open. This clears the persisted draftState, not the in-memory state.draftState.
+   */
+  private clearDraftStateFromPreferences(): void {
     const state = this.stateStore.getState();
     const options = state.renderOptions;
     
     (window.parent as Window).postMessage({ 
       pluginMessage: { 
         type: 'saveUserPreferences',
-        ...options
+        ...options,
+        draftState: null
       } 
     }, '*');
   }
@@ -607,13 +744,13 @@ class PluginFrontend {
    * Load user preferences
    * Note: Does not call convert() - let the initialization flow handle rendering
    */
-  private loadUserPreferences(prefs: any): void {
+  private loadUserPreferences(prefs: Partial<UserPreferences>): void {
     const renderOptions: RenderOptions = {
       tex: prefs.tex || '',
-      display: prefs.display !== undefined ? prefs.display : true,
-      fontSize: prefs.fontSize || 24,
-      backgroundColor: prefs.backgroundColor || '#000000',
-      fontColor: prefs.fontColor || '#E0E0E0',
+      display: prefs.display !== undefined ? prefs.display : DEFAULT_RENDER_OPTIONS.display,
+      fontSize: prefs.fontSize || DEFAULT_RENDER_OPTIONS.fontSize,
+      backgroundColor: prefs.backgroundColor || DEFAULT_RENDER_OPTIONS.backgroundColor,
+      fontColor: prefs.fontColor || DEFAULT_RENDER_OPTIONS.fontColor,
       subExpressionStyles: (prefs.subExpressionStyles || []).map((style: any) => ({
         expression: style.expression || '',
         color: style.color || '#000000',
@@ -816,6 +953,8 @@ class PluginFrontend {
     const svgElement = this.getSVGElement(state.currentSVGWrapper);
     if (svgElement) {
       setSVGColor(svgElement, color);
+      // Ensure error nodes maintain their custom styling
+      styleErrorNodes(svgElement);
     }
   }
 
@@ -878,8 +1017,8 @@ class PluginFrontend {
     // Use outerHTML to get the complete SVG element (not just innerHTML)
     const svg = svgElement.outerHTML;
     
-    // Calculate scale from font-size (default MathJax font-size is 12px per em)
-    const scale = options.fontSize / 16;
+    // Calculate scale from font-size
+    const scale = options.fontSize / MATHJAX_DEFAULT_FONT_SIZE;
     
     return {
       tex: options.tex,
@@ -929,22 +1068,20 @@ class PluginFrontend {
   private loadNodeData(message: any): Promise<void> {
     this.stateStore.updateState({ isLoadingNodeData: true });
     
-    // Save draft state BEFORE updating renderOptions (only if in create mode and we didn't just embed)
-    // If we just embedded, don't save draft state since we intentionally cleared it
+    // Save draft state BEFORE updating renderOptions (only if in create mode)
+    // If mode is already 'edit' (e.g., from embedding), don't save draftState
     const currentState = this.stateStore.getState();
-    if (currentState.mode === 'create' && !this.justEmbedded) {
+    if (currentState.mode === 'create') {
       this.saveDraftState();
     }
-    // Reset the flag after checking
-    this.justEmbedded = false;
     
     // Apply options to state store
     const options: RenderOptions = {
       tex: message.texSource || '',
-      display: message.renderOptions?.display !== undefined ? message.renderOptions.display : true,
-      fontSize: message.renderOptions?.fontSize || 16,
-      backgroundColor: message.renderOptions?.backgroundColor || '#000000',
-      fontColor: message.renderOptions?.fontColor || '#E0E0E0',
+      display: message.renderOptions?.display !== undefined ? message.renderOptions.display : DEFAULT_RENDER_OPTIONS.display,
+      fontSize: message.renderOptions?.fontSize || DEFAULT_RENDER_OPTIONS.fontSize,
+      backgroundColor: message.renderOptions?.backgroundColor || DEFAULT_RENDER_OPTIONS.backgroundColor,
+      fontColor: message.renderOptions?.fontColor || DEFAULT_RENDER_OPTIONS.fontColor,
       subExpressionStyles: (message.renderOptions?.subExpressionStyles || []).map((style: any) => ({
         expression: style.expression || '',
         color: style.color || '#000000',
@@ -991,6 +1128,20 @@ class PluginFrontend {
    */
   private selectAllText(event: FocusEvent | MouseEvent): void {
     const target = event.target as HTMLInputElement;
+    
+    // For number inputs, check if click was on spinner buttons (right side of input)
+    if (target.type === 'number' && event.type === 'mousedown') {
+      const mouseEvent = event as MouseEvent;
+      const inputRect = target.getBoundingClientRect();
+      const clickX = mouseEvent.clientX - inputRect.left;
+      const inputWidth = inputRect.width;
+      // Spinner buttons are typically on the right ~20-30px of number inputs
+      // If click is in the right portion, don't prevent default (allow spinner to work)
+      if (clickX > inputWidth - 30) {
+        return; // Let the spinner buttons work
+      }
+    }
+    
     // Prevent default mouseup behavior that might interfere with selection
     if (event.type === 'mousedown' || event.type === 'click') {
       event.preventDefault();

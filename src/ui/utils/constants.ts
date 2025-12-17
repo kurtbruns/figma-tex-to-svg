@@ -3,16 +3,32 @@
  */
 
 /**
+ * Default MathJax font size (in pixels) used for scale calculations
+ */
+export const MATHJAX_DEFAULT_FONT_SIZE = 13.5;
+
+/**
+ * Default render options (dark theme defaults)
+ * These are used throughout the application when loading node data or preferences
+ */
+export const DEFAULT_RENDER_OPTIONS = {
+  fontSize: 24,
+  backgroundColor: '#000000',
+  fontColor: '#EEEEEE',
+  display: true,
+} as const;
+
+/**
  * Theme defaults (without # prefix)
  */
 export const THEME_DEFAULTS: Record<string, { background: string; font: string }> = {
   window: {
     background: '38464F',
-    font: 'E0E0E0',
+    font: 'EEEEEE',
   },
   dark: {
     background: '000000',
-    font: 'E0E0E0',
+    font: 'EEEEEE',
   },
   light: {
     background: 'FFFFFF',

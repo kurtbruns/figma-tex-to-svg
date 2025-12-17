@@ -275,6 +275,7 @@ export class SubExpressionStyles {
       if (/^[0-9A-Fa-f]{1,6}$/i.test(value)) {
         const expanded = expandColor(value);
         colorPicker.value = '#' + expanded.substring(0, 6);
+        // Don't update state/styling on input - wait for change event (Enter/blur)
       }
       this.onChangeCallback?.();
     });
@@ -286,6 +287,8 @@ export class SubExpressionStyles {
         colorText.value = expanded.substring(0, 6);
         colorPicker.value = '#' + expanded.substring(0, 6);
         this.onUpdate(index, 'color', '#' + expanded);
+        // Directly update styling from state store (bypass DOM sync for immediate update)
+        this.onDirectStylingUpdateCallback?.();
       }
     });
 

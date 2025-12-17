@@ -39,17 +39,55 @@ export interface SubExpressionErrorCallbacks {
 }
 
 /**
- * Sets color on all SVG elements
+ * Sets color on all SVG elements, excluding error nodes
  */
 export function setSVGColor(svgElement: HTMLElement, color: string): void {
   // Set color on the root SVG element
   // svgElement.setAttribute('color', color);
   svgElement.style.color = color;
 
-  // Set fill style on all g elements
+  // Set fill style on all g elements, but exclude error nodes
   const gElements = svgElement.querySelectorAll('g');
   gElements.forEach((el: Element) => {
+    // Skip error nodes - they have their own styling
+    if (el.getAttribute('data-mml-node') === 'merror') {
+      return;
+    }
     (el as HTMLElement).style.fill = color;
+  });
+}
+
+/**
+ * Styles error nodes with custom colors (yellow background, red text)
+ * This ensures error messages are visible when nodes are placed in Figma
+ */
+export function styleErrorNodes(svgElement: HTMLElement): void {
+  // Find all error nodes
+  const errorNodes = svgElement.querySelectorAll('g[data-mml-node="merror"]');
+  
+  errorNodes.forEach((errorNode: Element) => {
+    // Style the background rectangle (yellow)
+    const backgroundRect = errorNode.querySelector('rect[data-background]');
+    if (backgroundRect) {
+      (backgroundRect as HTMLElement).style.fill = 'yellow';
+      (backgroundRect as HTMLElement).style.stroke = 'none';
+    }
+    
+    // Style the text content (red)
+    const textGroup = errorNode.querySelector('g[data-mml-node="mtext"]');
+    if (textGroup) {
+      (textGroup as HTMLElement).style.fill = 'red';
+      (textGroup as HTMLElement).style.stroke = 'red';
+      
+      // Also style any text elements within
+      const textElements = textGroup.querySelectorAll('text');
+      textElements.forEach((textEl: Element) => {
+        (textEl as HTMLElement).style.fill = 'red';
+      });
+    }
+    
+    // Style the error node itself (red)
+    (errorNode as HTMLElement).style.fill = 'red';
   });
 }
 
@@ -192,6 +230,31 @@ export function getMatchesByTex(tex: string, svgElement: HTMLElement): Element[]
 }
 
 /**
+ * Applies color to a node and all its nested groups
+ * This ensures parent groups properly cascade color to all nested elements
+ * @param node The node to apply color to
+ * @param color The color to apply (normalized with # prefix)
+ */
+function applyColorToNodeAndNestedGroups(node: Element, color: string): void {
+  // Apply color to the node itself
+  if ((node as HTMLElement).style) {
+    (node as HTMLElement).style.fill = color;
+  }
+  
+  // Recursively apply color to all nested groups, excluding error nodes
+  const nestedGroups = node.querySelectorAll('g');
+  nestedGroups.forEach((group: Element) => {
+    // Skip error nodes - they have their own styling
+    if (group.getAttribute('data-mml-node') === 'merror') {
+      return;
+    }
+    if ((group as HTMLElement).style) {
+      (group as HTMLElement).style.fill = color;
+    }
+  });
+}
+
+/**
  * Applies colors to sub-expressions in the rendered SVG
  * @param svgElement The rendered SVG element
  * @param styles Array of sub-expression styles (colors should be normalized with # prefix)
@@ -250,9 +313,7 @@ export function applySubExpressionColors(
       // Apply to all matches
       matches.forEach(matchedNodes => {
         matchedNodes.forEach(node => {
-          if ((node as HTMLElement).style) {
-            (node as HTMLElement).style.fill = normalizedColor;
-          }
+          applyColorToNodeAndNestedGroups(node, normalizedColor);
         });
       });
       if (errorCallbacks?.clearError) {
@@ -292,9 +353,7 @@ export function applySubExpressionColors(
         parsedIndices.forEach(arrayIndex => {
           if (matches[arrayIndex]) {
             matches[arrayIndex].forEach(node => {
-              if ((node as HTMLElement).style) {
-                (node as HTMLElement).style.fill = normalizedColor;
-              }
+              applyColorToNodeAndNestedGroups(node, normalizedColor);
             });
           }
         });
@@ -349,8 +408,11 @@ export function typesetMath(tex: string, options: TypesettingOptions): Promise<H
 
       let svgElement = node.firstChild as HTMLElement;
       
-      // Set the color on all SVG elements after rendering
+      // Set the color on all SVG elements after rendering (excluding error nodes)
       setSVGColor(svgElement, options.fontColor);
+
+      // Style error nodes with custom colors (yellow background, red text)
+      styleErrorNodes(svgElement);
 
       // Set font-size on the root SVG element (like vector library)
       node.setAttribute('font-size', options.fontSize + 'px');

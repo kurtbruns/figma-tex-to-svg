@@ -2,6 +2,9 @@
  * Plugin backend - handles Figma API operations
  */
 
+import { UserPreferences } from './ui/types';
+import { MATHJAX_DEFAULT_FONT_SIZE, DEFAULT_RENDER_OPTIONS } from './ui/utils/constants';
+
 class PluginBackend {
   private currentNodeWithData: SceneNode | null = null;
 
@@ -19,17 +22,11 @@ class PluginBackend {
     figma.showUI(__html__, { themeColors: true });
     figma.ui.resize(420, 560);
 
-    // Load saved user preferences on initialization
-    this.loadAndSendUserPreferences();
-
-    // Send theme to UI on load
-    this.sendTheme();
-
     // Set up event listeners
     this.setupEventListeners();
 
-    // Check selection on initial load
-    this.checkSelectionAndLoadData();
+    // Send initialization data (preferences, selection, theme) in a single message
+    this.sendInitializationData();
 
     return Promise.resolve();
   }
@@ -94,7 +91,7 @@ class PluginBackend {
   /**
    * Save user preferences
    */
-  private saveUserPreferences(pluginMessage: any): Promise<void> {
+  private saveUserPreferences(pluginMessage: UserPreferences & { type: 'saveUserPreferences' }): Promise<void> {
     return figma.clientStorage.setAsync('userPreferences', {
       tex: pluginMessage.tex,
       display: pluginMessage.display,
@@ -102,6 +99,7 @@ class PluginBackend {
       fontColor: pluginMessage.fontColor,
       fontSize: pluginMessage.fontSize,
       subExpressionStyles: pluginMessage.subExpressionStyles || [],
+      draftState: pluginMessage.draftState || null, // Include draftState field (null if not present)
     }).catch((err) => {
       console.error('Error saving user preferences:', err);
     });
@@ -119,24 +117,28 @@ class PluginBackend {
       figma.showUI(__html__, { themeColors: true });
       figma.ui.resize(420, 560);
       
-      // Send loadUserPreferences message with null (so frontend knows preferences were cleared)
-      // This allows the frontend initialization to proceed properly
-      figma.ui.postMessage({ 
-        type: 'loadUserPreferences', 
-        userPreferences: null 
+      // Set up event listeners
+      this.setupEventListeners();
+      
+      // Send initialization data (with null preferences since they were cleared)
+      // Then send reset message to trigger reset after initialization
+      const selection = figma.currentPage.selection;
+      const selectionData: { hasNode: boolean; nodeData?: { texSource: string; renderOptions: any; nodeId: string } } = {
+        hasNode: false
+      };
+      this.currentNodeWithData = null;
+      
+      const theme = ('uiTheme' in figma) ? figma.uiTheme : 'dark';
+      
+      figma.ui.postMessage({
+        type: 'initialize',
+        userPreferences: null,
+        selection: selectionData,
+        theme: theme
       });
       
       // Send reset message to UI (this will trigger the reset after initialization)
       figma.ui.postMessage({ type: 'resetToDefaults' });
-      
-      // Send theme to UI
-      this.sendTheme();
-      
-      // Set up event listeners
-      this.setupEventListeners();
-      
-      // Check selection on initial load
-      this.checkSelectionAndLoadData();
       
       // Show notification
       figma.notify('Plugin reset to default settings');
@@ -149,38 +151,97 @@ class PluginBackend {
   }
 
   /**
-   * Load and send user preferences to UI
-   * Always sends a message, even if no preferences exist (so frontend knows to proceed)
+   * Send initialization data to UI
+   * Combines user preferences, selection state, and theme in a single message
+   * This eliminates race conditions between separate messages
    */
-  private loadAndSendUserPreferences(): Promise<void> {
-    return figma.clientStorage.getAsync('userPreferences')
-      .then((userPreferences) => {
-        // Always send a message, even if preferences don't exist
-        // This allows the frontend to know preferences were checked and proceed with initialization
-        figma.ui.postMessage({ 
-          type: 'loadUserPreferences', 
-          userPreferences: userPreferences || null 
+  private sendInitializationData(): void {
+    // Load user preferences
+    figma.clientStorage.getAsync('userPreferences')
+      .then((userPreferences: UserPreferences | undefined) => {
+        // Check selection state
+        const selection = figma.currentPage.selection;
+        let selectionData: { hasNode: boolean; nodeData?: { texSource: string; renderOptions: any; nodeId: string } } = {
+          hasNode: false
+        };
+
+        if (selection.length === 1) {
+          let node: SceneNode | null = selection[0];
+          
+          // Check the node and its parents for plugin data
+          while (node) {
+            const texSource = node.getPluginData("texSource");
+            const renderOptionsStr = node.getPluginData("renderOptions");
+            
+            if (texSource && renderOptionsStr) {
+              try {
+                const renderOptions = JSON.parse(renderOptionsStr);
+                // Track this node as the current node with data
+                this.currentNodeWithData = node;
+                selectionData = {
+                  hasNode: true,
+                  nodeData: {
+                    texSource,
+                    renderOptions,
+                    nodeId: node.id
+                  }
+                };
+                break; // Found data, stop searching
+              } catch (err) {
+                console.error('Error parsing renderOptions:', err);
+              }
+            }
+            
+            // Check parent if available (only SceneNode types, not PAGE or DOCUMENT)
+            if ('parent' in node && node.parent) {
+              const parent = node.parent;
+              if (parent.type !== 'PAGE' && parent.type !== 'DOCUMENT') {
+                node = parent as SceneNode;
+              } else {
+                node = null;
+              }
+            } else {
+              node = null;
+            }
+          }
+        }
+        
+        // No node with plugin data found
+        if (!selectionData.hasNode) {
+          this.currentNodeWithData = null;
+        }
+
+        // Get theme
+        const theme = ('uiTheme' in figma) ? figma.uiTheme : 'dark';
+
+        // Send combined initialization message
+        figma.ui.postMessage({
+          type: 'initialize',
+          userPreferences: userPreferences || null,
+          selection: selectionData,
+          theme: theme
         });
       })
       .catch((err) => {
         console.error('Error loading user preferences:', err);
-        // Still send message on error so frontend can proceed
-        figma.ui.postMessage({ 
-          type: 'loadUserPreferences', 
-          userPreferences: null 
+        // Still send initialization message on error with null preferences
+        const selection = figma.currentPage.selection;
+        const selectionData: { hasNode: boolean; nodeData?: { texSource: string; renderOptions: any; nodeId: string } } = {
+          hasNode: false
+        };
+        this.currentNodeWithData = null;
+        
+        const theme = ('uiTheme' in figma) ? figma.uiTheme : 'dark';
+        
+        figma.ui.postMessage({
+          type: 'initialize',
+          userPreferences: null,
+          selection: selectionData,
+          theme: theme
         });
       });
   }
 
-  /**
-   * Send theme to UI
-   */
-  private sendTheme(): void {
-    if ('uiTheme' in figma) {
-      console.log('uiTheme', figma.uiTheme);
-      figma.ui.postMessage({ theme: figma.uiTheme });
-    }
-  }
 
   /**
    * Focus viewport on node's bottom-right corner
@@ -241,13 +302,9 @@ class PluginBackend {
     // Validate and ensure scale is a valid number
     let scale = pluginMessage.scale;
     if (typeof scale !== 'number' || isNaN(scale) || !isFinite(scale)) {
-      // Fallback: calculate scale from fontSize if provided, otherwise use default
-      const fontSize = pluginMessage.fontSize;
-      if (typeof fontSize === 'number' && !isNaN(fontSize) && isFinite(fontSize)) {
-        scale = fontSize / 16;
-      } else {
-        scale = 1; // Default scale
-      }
+      // Fallback: calculate scale from fontSize (should always be present)
+      const fontSize = pluginMessage.fontSize || DEFAULT_RENDER_OPTIONS.fontSize;
+      scale = fontSize / MATHJAX_DEFAULT_FONT_SIZE;
     }
     
     // Check if we should update an existing node
@@ -291,10 +348,10 @@ class PluginBackend {
           // Update plugin data
           group.setPluginData("texSource", pluginMessage.tex);
           group.setPluginData("renderOptions", JSON.stringify({
-            display: pluginMessage.display !== undefined ? pluginMessage.display : true,
-            fontSize: pluginMessage.fontSize || 16,
-            fontColor: pluginMessage.fontColor || "#000000",
-            backgroundColor: pluginMessage.backgroundColor || "#FFFFFF",
+            display: pluginMessage.display !== undefined ? pluginMessage.display : DEFAULT_RENDER_OPTIONS.display,
+            fontSize: pluginMessage.fontSize || DEFAULT_RENDER_OPTIONS.fontSize,
+            fontColor: pluginMessage.fontColor || DEFAULT_RENDER_OPTIONS.fontColor,
+            backgroundColor: pluginMessage.backgroundColor || DEFAULT_RENDER_OPTIONS.backgroundColor,
             subExpressionStyles: (pluginMessage.subExpressionStyles || []).map((style: any) => ({
               expression: style.expression || '',
               color: style.color || '#000000',
@@ -336,10 +393,10 @@ class PluginBackend {
     // Store plugin data on the group
     group.setPluginData("texSource", pluginMessage.tex);
     group.setPluginData("renderOptions", JSON.stringify({
-      display: pluginMessage.display !== undefined ? pluginMessage.display : true,
-      fontSize: pluginMessage.fontSize || 16,
-      fontColor: pluginMessage.fontColor || "#000000",
-      backgroundColor: pluginMessage.backgroundColor || "#FFFFFF",
+      display: pluginMessage.display !== undefined ? pluginMessage.display : DEFAULT_RENDER_OPTIONS.display,
+      fontSize: pluginMessage.fontSize || DEFAULT_RENDER_OPTIONS.fontSize,
+      fontColor: pluginMessage.fontColor || DEFAULT_RENDER_OPTIONS.fontColor,
+      backgroundColor: pluginMessage.backgroundColor || DEFAULT_RENDER_OPTIONS.backgroundColor,
       subExpressionStyles: (pluginMessage.subExpressionStyles || []).map((style: any) => ({
         expression: style.expression || '',
         color: style.color || '#000000',
