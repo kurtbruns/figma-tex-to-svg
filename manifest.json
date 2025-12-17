@@ -1,5 +1,5 @@
 {
-  "name": "tex-to-svg",
+  "name": "mathtex-editor",
   "id": "1255629578161025994",
   "api": "1.0.0",
   "main": "dist/code.js",

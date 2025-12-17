@@ -1,3 +1,4 @@
+# MathTeX Editor
 
 Figma plugin to render TeX as SVG and embed it in a Figma Design Document.
 
@@ -65,12 +66,11 @@ After committing changes, updating the version, and building, publish to Figma:
 
 1. **Open Figma Desktop** (publishing is only available in the desktop app, not the web version)
 2. **Open your plugin** in development mode
-3. **Go to** `Plugins` → `Development` → `Your Plugin Name`
-4. **Click** the `...` menu next to your plugin
-5. **Select** `Publish` or `Publish new version`
-6. **Fill in** the version details:
+3. **Go to** `Plugins` → `Development` → `Mange Plugins in Development`
+4. **Select** `Publish new version`
+5. **Fill in** the version details:
    - Version number (should match the version in `package.json`)
    - Release notes describing the changes
-7. **Click** `Publish`
+6. **Click** `Publish`
 
 The new version will be available to users after Figma reviews and approves it (if required for your plugin).
