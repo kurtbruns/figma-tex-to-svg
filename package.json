@@ -1,6 +1,6 @@
 {
   "name": "mathtex-editor",
-  "version": "5.0.0",
+  "version": "6.0.0",
   "description": "Figma plugin to render TeX as SVG and embed it in a Figma Design Document.",
   "main": "dist/code.js",
   "scripts": {
