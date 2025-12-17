@@ -238,6 +238,18 @@ class PluginBackend {
     const margin = 4;
     const bgcolor = pluginMessage.backgroundColor;
     
+    // Validate and ensure scale is a valid number
+    let scale = pluginMessage.scale;
+    if (typeof scale !== 'number' || isNaN(scale) || !isFinite(scale)) {
+      // Fallback: calculate scale from fontSize if provided, otherwise use default
+      const fontSize = pluginMessage.fontSize;
+      if (typeof fontSize === 'number' && !isNaN(fontSize) && isFinite(fontSize)) {
+        scale = fontSize / 16;
+      } else {
+        scale = 1; // Default scale
+      }
+    }
+    
     // Check if we should update an existing node
     if (this.currentNodeWithData && pluginMessage.updateExisting) {
       // Update existing node
@@ -263,7 +275,7 @@ class PluginBackend {
           
           // Create new SVG
           let svg = figma.createNodeFromSvg(pluginMessage.svg);
-          svg.rescale(pluginMessage.scale);
+          svg.rescale(scale);
           
           // Position new SVG relative to background
           svg.x = background.x + margin;
@@ -302,7 +314,7 @@ class PluginBackend {
     const nodes: SceneNode[] = [];
     const background = figma.createRectangle();
     let svg = figma.createNodeFromSvg(pluginMessage.svg);
-    svg.rescale(pluginMessage.scale);
+    svg.rescale(scale);
 
     // Center the frame in our current viewport so we can see it.
     svg.x = figma.viewport.center.x - svg.width / 2;
@@ -340,7 +352,17 @@ class PluginBackend {
 
     figma.currentPage.selection = [group];
 
+    // Scroll and zoom to ensure element is visible, then adjust viewport to position at bottom-right
     figma.viewport.scrollAndZoomIntoView([group]);
+    
+    // After scrollAndZoomIntoView, adjust viewport so element is visible
+    const shiftX = background.width / 2;
+    const shiftY = 0;
+    
+    figma.viewport.center = {
+      x: figma.viewport.center.x + shiftX,
+      y: figma.viewport.center.y + shiftY
+    };
   }
 
   /**

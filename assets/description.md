@@ -8,7 +8,7 @@ Render math expressions in Figma using TeX syntax.
 
 Render math expressions in Figma using TeX syntax. Enter TeX, customize appearance (font size, colors, background), and optionally style specific sub-expressions with different colors. After embedding the rendered math in the design, you can update the math by selecting the node and changing the TeX input or render options.
 
-For example, to render the fundamental theorem of calculus, enter the following TeX into the text area and click the "embed" button. This will render the math as an SVG and insert it in the design.
+For example, enter a string like "2+3=5" into the text area to render the math as an SVG and insert it in the document.
 
 Source code: https://github.com/kurtbruns/figma-mathtex-editor
 Created by: Kurt Bruns

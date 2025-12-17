@@ -9,3 +9,5 @@ code.js
 
 # OSX
 .DS_Store
+
+*.fcpbundle

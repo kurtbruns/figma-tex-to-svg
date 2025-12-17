@@ -16,6 +16,7 @@ class PluginFrontend {
   private preferencesLoadedResolver: ((value: void | PromiseLike<void>) => void) | null = null;
   private isInitializing: boolean = false;
   private pendingReset: boolean = false;
+  private justEmbedded: boolean = false;
 
   /**
    * Initialize the plugin frontend
@@ -202,6 +203,9 @@ class PluginFrontend {
           console.error('No SVG to embed');
           return;
         }
+        // Clear draft state since we're embedding it (it's no longer a draft)
+        this.stateStore.updateState({ draftState: null });
+        this.justEmbedded = true;
         (window.parent as Window).postMessage({ pluginMessage: data }, '*');
       };
     }
@@ -326,10 +330,13 @@ class PluginFrontend {
       displayInput.checked = state.renderOptions.display;
     }
 
-    // Update font size (only if different)
+    // Update font size (only if different and valid)
     const fontSizeInput = document.getElementById('font-size') as HTMLInputElement;
-    if (fontSizeInput && fontSizeInput.value !== state.renderOptions.fontSize.toString()) {
-      fontSizeInput.value = state.renderOptions.fontSize.toString();
+    if (fontSizeInput && !isNaN(state.renderOptions.fontSize)) {
+      const fontSizeString = state.renderOptions.fontSize.toString();
+      if (fontSizeInput.value !== fontSizeString) {
+        fontSizeInput.value = fontSizeString;
+      }
     }
 
     // Update colors (strip # prefix for text inputs)
@@ -463,13 +470,34 @@ class PluginFrontend {
    */
   private switchToCreateMode(): void {
     const state = this.stateStore.getState();
-    this.stateStore.updateState({
-      mode: 'create',
-      currentNodeId: null
-    });
     
-    // Restore draft state if available
-    this.restoreDraftState();
+    // Restore draft state if available, otherwise clear tex (keep other settings)
+    if (state.draftState) {
+      this.stateStore.updateState({
+        mode: 'create',
+        currentNodeId: null
+      });
+      this.restoreDraftState();
+    } else {
+      // No draft to restore - clear tex but preserve other settings
+      // Get fresh state to ensure we have current renderOptions
+      const currentState = this.stateStore.getState();
+      this.stateStore.updateState({
+        mode: 'create',
+        currentNodeId: null,
+        renderOptions: {
+          ...currentState.renderOptions,
+          tex: ''
+        },
+        lastRenderedTex: null,
+        lastRenderedDisplay: null,
+        currentSVGWrapper: null
+      });
+      // Explicitly update UI to ensure tex field is cleared
+      const updatedState = this.stateStore.getState();
+      this.updateUIFromState(updatedState);
+      this.convert();
+    }
   }
 
   /**
@@ -901,11 +929,14 @@ class PluginFrontend {
   private loadNodeData(message: any): Promise<void> {
     this.stateStore.updateState({ isLoadingNodeData: true });
     
-    // Save draft state BEFORE updating renderOptions (only if in create mode)
+    // Save draft state BEFORE updating renderOptions (only if in create mode and we didn't just embed)
+    // If we just embedded, don't save draft state since we intentionally cleared it
     const currentState = this.stateStore.getState();
-    if (currentState.mode === 'create') {
+    if (currentState.mode === 'create' && !this.justEmbedded) {
       this.saveDraftState();
     }
+    // Reset the flag after checking
+    this.justEmbedded = false;
     
     // Apply options to state store
     const options: RenderOptions = {
