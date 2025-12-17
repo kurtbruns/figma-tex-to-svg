@@ -567,7 +567,7 @@ class PluginFrontend {
       });
       this.restoreDraftState();
     } else {
-      // No draft to restore - clear tex but preserve other settings
+      // No draft to restore - clear tex and sub-expression styles (start fresh)
       // Get fresh state to ensure we have current renderOptions
       const currentState = this.stateStore.getState();
       this.stateStore.updateState({
@@ -575,7 +575,8 @@ class PluginFrontend {
         currentNodeId: null,
         renderOptions: {
           ...currentState.renderOptions,
-          tex: ''
+          tex: '',
+          subExpressionStyles: [] // Clear styles when starting fresh
         },
         lastRenderedTex: null,
         lastRenderedDisplay: null,
